@@ -13,7 +13,7 @@
     <PackageTags>Azure;SDK;Functions;Storage;ResourceGroups;Cloud</PackageTags>
     <RepositoryUrl>https://github.com/AutomatedAdventures/azure-for-humans</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageLicenseExpression>LGPL-2.1</PackageLicenseExpression>
+    <PackageLicenseExpression>LGPL-2.1-or-later</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <IncludeSymbols>true</IncludeSymbols>
