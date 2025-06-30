@@ -4,7 +4,26 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    
+    <!-- NuGet Package Properties -->
+    <PackageId>AzureForHumans</PackageId>
+    <PackageVersion>0.1.0</PackageVersion>
+    <Authors>Javier Asensio Montiel; Víctor Calatayud Asensio</Authors>
+    <Description>A human-friendly wrapper for Azure SDK that simplifies common Azure operations like deploying Azure Functions, managing resource groups, and working with storage accounts.</Description>
+    <PackageTags>Azure;SDK;Functions;Storage;ResourceGroups;Cloud</PackageTags>
+    <RepositoryUrl>https://github.com/AutomatedAdventures/azure-for-humans</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>LGPL-2.1</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Azure.Identity" Version="1.13.2" />
