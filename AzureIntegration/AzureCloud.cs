@@ -73,7 +73,7 @@ public class AzureCloud
                 new() { Name = "WEBSITE_CONTENTSHARE", Value = name.ToLower() },
                 //TODO: Add more environment variables from parameter
             ],
-            LinuxFxVersion = "DOTNET-ISOLATED|9.0",
+            LinuxFxVersion = "DOTNET-ISOLATED|8.0",
             }
         };
 

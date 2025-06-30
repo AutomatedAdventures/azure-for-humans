@@ -34,7 +34,7 @@ public class Tests
     [Test]
     public async Task DeployAzureFunction(){
         var azure = new AzureCloud();
-        await azure.DeployAzureFunction(projectDirectory: "AzureFunctionSample", name: "AzureFunctionSample-name");
+        await azure.DeployAzureFunction(projectDirectory: "AzureFunctionSample", name: "AzureFunctionSample-name999");
         var client = new HttpClient();
         client.BaseAddress = new Uri("https://azurefunctionsample-name.azurewebsites.net");
         var response = await client.GetAsync("api/HttpTrigger");

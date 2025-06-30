@@ -71,7 +71,7 @@ Console.WriteLine($"Connection String: {storageAccount.ConnectionString}");
 
 ## Prerequisites
 
-- .NET 9.0 or later
+- .NET 8.0 or later
 - Azure subscription
 - Azure credentials configured (Azure CLI, Visual Studio, environment variables, etc.)
 
@@ -92,7 +92,7 @@ Make sure you're authenticated using one of these methods before using the libra
 The library uses the following default settings:
 
 - **Location**: West Europe (you can modify this in the source code)
-- **Runtime**: .NET 9.0 isolated
+- **Runtime**: .NET 8.0 isolated
 - **App Service Plan**: Dynamic (Consumption) plan
 
 ## Example Projects
