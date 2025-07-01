@@ -73,7 +73,7 @@ public class AzureCloud
                 new() { Name = "WEBSITE_CONTENTSHARE", Value = name.ToLower() },
                 //TODO: Add more environment variables from parameter
             ],
-            LinuxFxVersion = "DOTNET-ISOLATED|9.0",
+            LinuxFxVersion = "DOTNET-ISOLATED|8.0",
             }
         };
 
@@ -113,8 +113,7 @@ public class AzureCloud
 
         Console.WriteLine($"Function App '{functionApp.Value.Data.Name}' created successfully.");
 
-        return new AzureFunction(functionApp.Value);
-
+        return new AzureFunction(functionApp.Value, resourceGroup.resourceGroup.Data.Name, this);
     }
 
     //TODO: use project name instead of project directory
@@ -368,15 +367,24 @@ public class AppServicePlan
     public ResourceIdentifier Id => _appServicePlan.Id;
 }
 
-public class AzureFunction
+public class AzureFunction : IAsyncDisposable
 {
     private readonly WebSiteResource _functionApp;
+    private readonly string _resourceGroupName;
+    private readonly AzureCloud _azureCloud;
 
-    public AzureFunction(WebSiteResource functionApp)
+    public AzureFunction(WebSiteResource functionApp, string resourceGroupName, AzureCloud azureCloud)
     {
         _functionApp = functionApp;
+        _resourceGroupName = resourceGroupName;
+        _azureCloud = azureCloud;
     }
 
     public string Name => _functionApp.Data.Name;
     public string Url => _functionApp.Data.DefaultHostName;
+
+    public async ValueTask DisposeAsync()
+    {
+        await _azureCloud.DeleteResourceGroup(_resourceGroupName);
+    }
 }

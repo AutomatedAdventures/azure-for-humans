@@ -34,13 +34,17 @@ public class Tests
     [Test]
     public async Task DeployAzureFunction(){
         var azure = new AzureCloud();
-        await azure.DeployAzureFunction(projectDirectory: "AzureFunctionSample", name: "AzureFunctionSample-name");
-        var client = new HttpClient();
-        client.BaseAddress = new Uri("https://azurefunctionsample-name.azurewebsites.net");
-        var response = await client.GetAsync("api/HttpTrigger");
+        var uniqueId = Guid.NewGuid().ToString("N").Substring(0, 8);
+        var functionName = $"AzureFunctionSample-{uniqueId}";
+        await using (var function = await azure.DeployAzureFunction(projectDirectory: "AzureFunctionSample", name: functionName))
+        {
+            var client = new HttpClient();
+            client.BaseAddress = new Uri($"https://{functionName.ToLower()}.azurewebsites.net");
+            var response = await client.GetAsync("api/HttpTrigger");
 
-        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
-        var content = await response.Content.ReadAsStringAsync();
-        Assert.That(content, Is.EqualTo("Azure Functions Sample test result"));
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            var content = await response.Content.ReadAsStringAsync();
+            Assert.That(content, Is.EqualTo("Azure Functions Sample test result"));
+        }
     }
 }
