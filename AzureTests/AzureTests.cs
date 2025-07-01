@@ -34,7 +34,8 @@ public class Tests
     [Test]
     public async Task DeployAzureFunction(){
         var azure = new AzureCloud();
-        var functionName = "AzureFunctionSample-name999";
+        var uniqueId = Guid.NewGuid().ToString("N").Substring(0, 8);
+        var functionName = $"AzureFunctionSample-{uniqueId}";
         await using (var function = await azure.DeployAzureFunction(projectDirectory: "AzureFunctionSample", name: functionName))
         {
             var client = new HttpClient();
