@@ -33,6 +33,8 @@ public class Tests
 
     [Test]
     public async Task DeployAzureFunction(){
+        //TODO: remove azure function after test
+        //TODO: make idempotent
         var azure = new AzureCloud();
         await azure.DeployAzureFunction(projectDirectory: "AzureFunctionSample", name: "AzureFunctionSample-name999");
         var client = new HttpClient();
