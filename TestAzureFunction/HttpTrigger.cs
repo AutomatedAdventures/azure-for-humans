@@ -20,5 +20,29 @@ namespace azure.functions.sample
             _logger.LogInformation("C# HTTP trigger function processed a request.");
             return new OkObjectResult("Azure Functions Sample test result");
         }
+
+        [Function("Variable")]
+        public IActionResult GetVariable(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "variable/{name}")] HttpRequest req,
+            string name)
+        {
+            var value = Environment.GetEnvironmentVariable(name);
+            if (value == null)
+                return new NotFoundResult();
+            return new OkObjectResult(value);
+        }
+
+        [Function("Variables")]
+        public IActionResult GetVariables(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "variables")] HttpRequest req)
+        {
+            var envVars = Environment.GetEnvironmentVariables();
+            var dict = new Dictionary<string, string>();
+            foreach (var key in envVars.Keys)
+            {
+                dict[key.ToString()!] = envVars[key]?.ToString() ?? string.Empty;
+            }
+            return new OkObjectResult(dict);
+        }
     }
 }

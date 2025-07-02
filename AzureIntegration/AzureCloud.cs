@@ -45,7 +45,7 @@ public class AzureCloud
         await _subscription.GetResourceGroups().Get(name).Value.DeleteAsync(WaitUntil.Completed);
     }
 
-    public async Task<AzureFunction> DeployAzureFunction(string projectDirectory, string name)
+    public async Task<AzureFunction> DeployAzureFunction(string projectDirectory, string name, Dictionary<string, string>? environmentVariables = null)
     {
         var zipFilePath = CreateAzureFunctionZipFile(projectDirectory);
         var resourceGroup = await CreateResourceGroup(name);
