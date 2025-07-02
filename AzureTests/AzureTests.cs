@@ -47,4 +47,32 @@ public class Tests
             Assert.That(content, Is.EqualTo("Azure Functions Sample test result"));
         }
     }
+
+    [Test]
+    public async Task DeployAzureFunction_WithEnvironmentVariables()
+    {
+        var azure = new AzureCloud();
+        var uniqueId = Guid.NewGuid().ToString("N").Substring(0, 8);
+        var functionName = $"TestAzureFunction-{uniqueId}";
+        var envVars = new Dictionary<string, string>
+        {
+            {"MY_ENV_VAR1", "value1"},
+            {"MY_ENV_VAR2", "value2"}
+        };
+        await using (var function = await azure.DeployAzureFunction(
+            projectDirectory: "TestAzureFunction",
+            name: functionName,
+            environmentVariables: envVars))
+        {
+            var client = new HttpClient();
+            client.BaseAddress = new Uri($"https://{functionName.ToLower()}.azurewebsites.net");
+            foreach (var kvp in envVars)
+            {
+                var response = await client.GetAsync($"api/variable/{kvp.Key}");
+                Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK), $"Variable {kvp.Key} not found");
+                var value = await response.Content.ReadAsStringAsync();
+                Assert.That(value.Trim('"'), Is.EqualTo(kvp.Value), $"Variable {kvp.Key} value mismatch");
+            }
+        }
+    }
 }
