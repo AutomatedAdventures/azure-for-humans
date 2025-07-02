@@ -54,26 +54,33 @@ public class AzureCloud
         
         //TODO: Create application insights
 
+        var appSettings = new List<AppServiceNameValuePair>
+        {
+            new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") },
+            new() { Name = "AzureWebJobsStorage", Value = storageAccount.ConnectionString },
+            new() { Name = "WEBSITE_RUN_FROM_PACKAGE", Value = "1"},
+            new() { Name = "FUNCTIONS_EXTENSION_VERSION", Value = "~4" },
+            new() { Name = "FUNCTIONS_WORKER_RUNTIME", Value = "dotnet-isolated" },
+            new() { Name = "SCM_DO_BUILD_DURING_DEPLOYMENT", Value = "0" },
+            new() { Name = "WEBSITE_USE_PLACEHOLDER_DOTNETISOLATED", Value = "1" },
+            new() { Name = "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING", Value = storageAccount.ConnectionString },
+            new() { Name = "WEBSITE_CONTENTSHARE", Value = name.ToLower() }
+        };
+        if (environmentVariables != null)
+        {
+            foreach (var kvp in environmentVariables)
+            {
+                appSettings.Add(new AppServiceNameValuePair { Name = kvp.Key, Value = kvp.Value });
+            }
+        }
         var functionAppData = new WebSiteData(resourceGroup.resourceGroup.Data.Location)
         {
             AppServicePlanId = appServicePlan.Id,
             Kind = "functionapp,linux",
             SiteConfig = new SiteConfigProperties
             {
-            AppSettings =
-            [
-                new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") },
-                new() { Name = "AzureWebJobsStorage", Value = storageAccount.ConnectionString },
-                new() { Name = "WEBSITE_RUN_FROM_PACKAGE", Value = "1"},
-                new() { Name = "FUNCTIONS_EXTENSION_VERSION", Value = "~4" },
-                new() { Name = "FUNCTIONS_WORKER_RUNTIME", Value = "dotnet-isolated" },
-                new() { Name = "SCM_DO_BUILD_DURING_DEPLOYMENT", Value = "0" },
-                new() { Name = "WEBSITE_USE_PLACEHOLDER_DOTNETISOLATED", Value = "1" },
-                new() { Name = "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING", Value = storageAccount.ConnectionString },
-                new() { Name = "WEBSITE_CONTENTSHARE", Value = name.ToLower() },
-                //TODO: Add more environment variables from parameter
-            ],
-            LinuxFxVersion = "DOTNET-ISOLATED|8.0",
+                AppSettings = appSettings,
+                LinuxFxVersion = "DOTNET-ISOLATED|8.0",
             }
         };
 
