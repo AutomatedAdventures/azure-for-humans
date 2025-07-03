@@ -358,34 +358,26 @@ public class AzureCloud
 
     private void PublishUsingMsBuild4(FileInfo projectFile, string publishDirectory)
     {
-            Console.WriteLine("Publishing project: {0}", projectFile.FullName);
-            Console.WriteLine("Publish directory: {0}", publishDirectory);
-            
-            var globalProperties = new Dictionary<string, string>
-            {
-                { "Configuration", "Release" },
-                { "PublishDir", publishDirectory }
-            };
+        Console.WriteLine($"Publishing {projectFile.Name} to {publishDirectory}");
+        var globalProperties = new Dictionary<string, string>
+        {
+            { "Configuration", "Release" },
+            { "OutputPath", publishDirectory },
+            { "MSBuildSDKsPath", @"/usr/share/dotnet/sdk" } // Adjust the path to your .NET SDK location
+        };
 
-            var projectCollection = new ProjectCollection(globalProperties);
-            var logger = new ConsoleLogger(LoggerVerbosity.Normal);
-            projectCollection.RegisterLogger(logger);
-            
-            var project = projectCollection.LoadProject(projectFile.FullName);
-            Console.WriteLine("Project loaded successfully. Available targets:");
-            foreach (var target in project.Targets.Keys)
-            {
-                Console.WriteLine("  - {0}", target);
-            }
-            
-            var buildResult = project.Build("Publish");
-            
-            if (!buildResult)
-            {
-                throw new InvalidOperationException($"Project publish failed for {projectFile.FullName}. Check build output above for details.");
-            }
-            
-            Console.WriteLine("Project published successfully to: {0}", publishDirectory);
+        var projectCollection = new ProjectCollection(globalProperties);
+        var logger = new ConsoleLogger(LoggerVerbosity.Normal);
+        projectCollection.RegisterLogger(logger);
+        var project = projectCollection.LoadProject(projectFile.FullName);
+        var buildResult = project.Build("Publish");
+        
+        if (!buildResult)
+        {
+            throw new InvalidOperationException($"Project publish failed for {projectFile.FullName}. Check build output above for details.");
+        }
+        
+        Console.WriteLine("Project published successfully to: {0}", publishDirectory);
     }
 
     public FileInfo GetProjectFile(string projectDirectory)
