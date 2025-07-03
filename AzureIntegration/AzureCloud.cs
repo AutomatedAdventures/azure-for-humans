@@ -43,7 +43,7 @@ public class AzureCloud
 
     public async Task<AzureFunction> DeployAzureFunction(string projectDirectory, string name, Dictionary<string, string>? environmentVariables = null)
     {
-        var zipFilePath = CreateAzureFunctionZipFile(projectDirectory);
+        var zipFilePath = CreateDeploymentZipFile(projectDirectory);
         var resourceGroup = await CreateResourceGroup(name);
         var storageAccount = await resourceGroup.CreateStorageAccount(name);
         var appServicePlan = await resourceGroup.CreateAppServicePlan(name);    
@@ -62,13 +62,7 @@ public class AzureCloud
             new() { Name = "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING", Value = storageAccount.ConnectionString },
             new() { Name = "WEBSITE_CONTENTSHARE", Value = name.ToLower() }
         };
-        if (environmentVariables != null)
-        {
-            foreach (var kvp in environmentVariables)
-            {
-                appSettings.Add(new AppServiceNameValuePair { Name = kvp.Key, Value = kvp.Value });
-            }
-        }
+        appSettings = AddEnvironmentVariablesToAppSettings(appSettings, environmentVariables);
         var functionAppData = new WebSiteData(resourceGroup.resourceGroup.Data.Location)
         {
             AppServicePlanId = appServicePlan.Id,
@@ -85,34 +79,7 @@ public class AzureCloud
 
         //TODO: link application insights
 
-        //TODO: make post to the azure function with the zip file
-
-        var httpClient = new HttpClient();
-
-        // URL del endpoint para subir el archivo ZIP tolower
-        var url = $"https://{name.ToLower()}.scm.azurewebsites.net/api/zipdeploy";
-
-        using var fileStream = new FileStream(zipFilePath, FileMode.Open);
-        using var content = new StreamContent(fileStream);
-        content.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
-
-        var accessToken = await _azureCredentials.GetTokenAsync(new TokenRequestContext(["https://management.azure.com/.default"]));
-        // Agregar encabezado de autorización
-        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
-
-        Console.WriteLine("Subiendo el archivo ZIP...");
-        var response = await httpClient.PostAsync(url, content);
-
-        if (response.IsSuccessStatusCode)
-        {
-            Console.WriteLine("¡Archivo ZIP subido exitosamente!");
-        }
-        else
-        {
-            Console.WriteLine($"Error al subir el archivo: {response.StatusCode}");
-            Console.WriteLine($"Detalles: {await response.Content.ReadAsStringAsync()}");
-        }
-        
+        await DeployZipFile(zipFilePath, name);
 
         Console.WriteLine($"Function App '{functionApp.Value.Data.Name}' created successfully.");
 
@@ -121,7 +88,7 @@ public class AzureCloud
 
     public async Task<AzureWebApp> DeployAppService(string projectDirectory, string name, Dictionary<string, string>? environmentVariables = null)
     {
-        var zipFilePath = CreateAzureFunctionZipFile(projectDirectory);
+        var zipFilePath = CreateDeploymentZipFile(projectDirectory);
         var resourceGroup = await CreateResourceGroup(name);
         // Ensure App Service Plan name is unique per deployment
         var appServicePlanName = $"{name.ToLower()}-plan-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
@@ -138,13 +105,7 @@ public class AzureCloud
         {
             new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") }
         };
-        if (environmentVariables != null)
-        {
-            foreach (var kvp in environmentVariables)
-            {
-                appSettings.Add(new AppServiceNameValuePair { Name = kvp.Key, Value = kvp.Value });
-            }
-        }
+        appSettings = AddEnvironmentVariablesToAppSettings(appSettings, environmentVariables);
         var webAppData = new WebSiteData(resourceGroup.resourceGroup.Data.Location)
         {
             AppServicePlanId = appServicePlan.Value.Id,
@@ -158,26 +119,54 @@ public class AzureCloud
         var webApp = await resourceGroup.resourceGroup.GetWebSites().CreateOrUpdateAsync(
             WaitUntil.Completed, name, webAppData);
 
-        var httpClient = new HttpClient
-        {
-            Timeout = TimeSpan.FromMinutes(10)
-        };
-        var url = $"https://{name.ToLower()}.scm.azurewebsites.net/api/zipdeploy";
-        using var fileStream = new FileStream(zipFilePath, FileMode.Open);
-        using var content = new StreamContent(fileStream);
-        content.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
-        var accessToken = await _azureCredentials.GetTokenAsync(new TokenRequestContext(["https://management.azure.com/.default"]));
-        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
-        var response = await httpClient.PostAsync(url, content);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new Exception($"App Service deployment failed: {response.StatusCode} {await response.Content.ReadAsStringAsync()}");
-        }
+        await DeployZipFile(zipFilePath, name);
 
         // Wait for the App Service to be ready to receive HTTP requests
         await WaitForAppServiceToBeReady(webApp.Value.Data.DefaultHostName);
 
         return new AzureWebApp(webApp.Value, resourceGroup.resourceGroup.Data.Name, this);
+    }
+
+    private async Task DeployZipFile(string zipFilePath, string serviceName)
+    {
+        var httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromMinutes(10)
+        };
+        var url = $"https://{serviceName.ToLower()}.scm.azurewebsites.net/api/zipdeploy";
+        using var fileStream = new FileStream(zipFilePath, FileMode.Open, FileAccess.Read);
+        using var content = new StreamContent(fileStream);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
+        var accessToken = await _azureCredentials.GetTokenAsync(new TokenRequestContext(["https://management.azure.com/.default"]));
+        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
+        
+        Console.WriteLine($"Deploying zip file to {serviceName}...");
+        var response = await httpClient.PostAsync(url, content);
+        
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            throw new Exception($"Deployment failed for {serviceName}: {response.StatusCode} {errorContent}");
+        }
+        
+        Console.WriteLine($"Zip file deployed successfully to {serviceName}");
+    }
+
+    private List<AppServiceNameValuePair> AddEnvironmentVariablesToAppSettings(
+        List<AppServiceNameValuePair> baseSettings, 
+        Dictionary<string, string>? environmentVariables)
+    {
+        var appSettings = new List<AppServiceNameValuePair>(baseSettings);
+        
+        if (environmentVariables != null)
+        {
+            foreach (var kvp in environmentVariables)
+            {
+                appSettings.Add(new AppServiceNameValuePair { Name = kvp.Key, Value = kvp.Value });
+            }
+        }
+        
+        return appSettings;
     }
 
     private async Task WaitForAppServiceToBeReady(string hostName, int timeoutMinutes = 10, int intervalSeconds = 30)
@@ -223,14 +212,14 @@ public class AzureCloud
     }
 
     //TODO: use project name instead of project directory
-    private string CreateAzureFunctionZipFile(string projectDirectory)
+    private string CreateDeploymentZipFile(string projectDirectory)
     {
         var publishDirectory = PublishProject(projectDirectory);
 
         var destinationZipFile = Path.Combine(Path.GetTempPath(), "AzureFunctionPublish", Path.GetFileName(projectDirectory), "zip", $"{Path.GetFileName(projectDirectory)}.zip");
 
         var destinationZipDirectory = Path.GetDirectoryName(destinationZipFile);
-        if (!Directory.Exists(destinationZipDirectory))
+        if (!string.IsNullOrEmpty(destinationZipDirectory) && !Directory.Exists(destinationZipDirectory))
         {
             Directory.CreateDirectory(destinationZipDirectory);
         }
