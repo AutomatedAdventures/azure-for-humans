@@ -170,7 +170,53 @@ public class AzureCloud
         {
             throw new Exception($"App Service deployment failed: {response.StatusCode} {await response.Content.ReadAsStringAsync()}");
         }
+
+        // Wait for the App Service to be ready to receive HTTP requests
+        await WaitForAppServiceToBeReady(webApp.Value.Data.DefaultHostName);
+
         return new AzureWebApp(webApp.Value, resourceGroup.resourceGroup.Data.Name, this);
+    }
+
+    private async Task WaitForAppServiceToBeReady(string hostName, int timeoutMinutes = 10, int intervalSeconds = 30)
+    {
+        var appUrl = $"https://{hostName}";
+        var timeout = TimeSpan.FromMinutes(timeoutMinutes);
+        var interval = TimeSpan.FromSeconds(intervalSeconds);
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        Console.WriteLine($"Waiting for App Service to be ready at: {appUrl}");
+
+        using var httpClient = new HttpClient();
+        httpClient.Timeout = TimeSpan.FromSeconds(30);
+
+        while (stopwatch.Elapsed < timeout)
+        {
+            try
+            {
+                Console.WriteLine($"Checking App Service health... (elapsed: {stopwatch.Elapsed:mm\\:ss})");
+                var response = await httpClient.GetAsync(appUrl);
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"App Service is ready! Status: {response.StatusCode}");
+                    return;
+                }
+                
+                Console.WriteLine($"App Service not ready yet. Status: {response.StatusCode}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"App Service not ready yet. Error: {ex.Message}");
+            }
+
+            if (stopwatch.Elapsed + interval < timeout)
+            {
+                Console.WriteLine($"Waiting {intervalSeconds} seconds before next check...");
+                await Task.Delay(interval);
+            }
+        }
+
+        throw new TimeoutException($"App Service at {appUrl} did not become ready within {timeoutMinutes} minutes");
     }
 
     //TODO: use project name instead of project directory
