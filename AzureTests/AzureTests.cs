@@ -75,4 +75,21 @@ public class Tests
             }
         }
     }
+
+    [Test]
+    public async Task DeployAppService()
+    {
+        var azure = new AzureCloud();
+        var uniqueId = Guid.NewGuid().ToString("N").Substring(0, 8);
+        var appServiceName = $"TestAppService-{uniqueId}";
+        await using (var app = await azure.DeployAppService(projectDirectory: "TestAppService", name: appServiceName))
+        {
+            var client = new HttpClient();
+            client.BaseAddress = new Uri($"https://{appServiceName.ToLower()}.azurewebsites.net");
+            var response = await client.GetAsync("/");
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            var content = await response.Content.ReadAsStringAsync();
+            Assert.That(content, Is.EqualTo("TestAppService deployment successful!"));
+        }
+    }
 }
