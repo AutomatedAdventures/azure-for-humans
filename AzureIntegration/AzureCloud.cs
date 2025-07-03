@@ -138,6 +138,13 @@ public class AzureCloud
         {
             new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") }
         };
+        if (environmentVariables != null)
+        {
+            foreach (var kvp in environmentVariables)
+            {
+                appSettings.Add(new AppServiceNameValuePair { Name = kvp.Key, Value = kvp.Value });
+            }
+        }
         var webAppData = new WebSiteData(resourceGroup.resourceGroup.Data.Location)
         {
             AppServicePlanId = appServicePlan.Value.Id,
