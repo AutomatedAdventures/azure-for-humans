@@ -25,6 +25,9 @@ public class AzureCloud
     // Static lock and flag for MSBuild registration to ensure thread safety
     private static readonly object MSBuildLock = new object();
     private static bool MSBuildRegistered = false;
+    
+    // Static lock for MSBuild operations to prevent concurrent builds
+    private static readonly object MSBuildOperationLock = new object();
 
     public AzureCloud()
     {
@@ -282,22 +285,26 @@ public class AzureCloud
     private void PublishProjectUsingMsBuild(FileInfo projectFile, string publishDirectory)
     {
         Console.WriteLine($"Publishing {projectFile.Name} to {publishDirectory}");
-        var globalProperties = new Dictionary<string, string>
-        {
-            { "Configuration", "Release" },
-            { "OutputPath", publishDirectory },
-            { "MSBuildSDKsPath", @"/usr/share/dotnet/sdk" } // Adjust the path to your .NET SDK location
-        };
-
-        var projectCollection = new ProjectCollection(globalProperties);
-        var logger = new ConsoleLogger(LoggerVerbosity.Normal);
-        projectCollection.RegisterLogger(logger);
-        var project = projectCollection.LoadProject(projectFile.FullName);
-        var buildResult = project.Build("Publish");
         
-        if (!buildResult)
+        lock (MSBuildOperationLock)
         {
-            throw new InvalidOperationException($"Project publish failed for {projectFile.FullName}. Check build output above for details.");
+            var globalProperties = new Dictionary<string, string>
+            {
+                { "Configuration", "Release" },
+                { "OutputPath", publishDirectory },
+                { "MSBuildSDKsPath", @"/usr/share/dotnet/sdk" } // Adjust the path to your .NET SDK location
+            };
+
+            var projectCollection = new ProjectCollection(globalProperties);
+            var logger = new ConsoleLogger(LoggerVerbosity.Normal);
+            projectCollection.RegisterLogger(logger);
+            var project = projectCollection.LoadProject(projectFile.FullName);
+            var buildResult = project.Build("Publish");
+            
+            if (!buildResult)
+            {
+                throw new InvalidOperationException($"Project publish failed for {projectFile.FullName}. Check build output above for details.");
+            }
         }
         
         Console.WriteLine("Project published successfully to: {0}", publishDirectory);
