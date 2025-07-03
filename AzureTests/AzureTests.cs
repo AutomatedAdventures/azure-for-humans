@@ -33,6 +33,7 @@ public class Tests
 
     [Test]
     public async Task DeployAzureFunction(){
+        throw new Exception("You are running the wrong test");
         var azure = new AzureCloud();
         var uniqueId = Guid.NewGuid().ToString("N").Substring(0, 8);
         var functionName = $"AzureFunctionSample-{uniqueId}";
@@ -51,6 +52,7 @@ public class Tests
     [Test]
     public async Task DeployAzureFunction_WithEnvironmentVariables()
     {
+        throw new Exception("You are running the wrong test");
         var azure = new AzureCloud();
         var uniqueId = Guid.NewGuid().ToString("N").Substring(0, 8);
         var functionName = $"TestAzureFunction-{uniqueId}";

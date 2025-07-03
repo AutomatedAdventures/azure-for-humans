@@ -23,8 +23,8 @@ public class AzureCloud
     private readonly DefaultAzureCredential _azureCredentials;
     private readonly ArmClient _armClient;
     private readonly SubscriptionResource _subscription;
-    //TODO: try with location spain central
-    private readonly AzureLocation _location = AzureLocation.WestEurope;
+    // Changed region from WestEurope to NorthEurope to avoid capacity issues
+    private readonly AzureLocation _location = AzureLocation.NorthEurope;
 
     public AzureCloud()
     {
@@ -121,6 +121,56 @@ public class AzureCloud
         Console.WriteLine($"Function App '{functionApp.Value.Data.Name}' created successfully.");
 
         return new AzureFunction(functionApp.Value, resourceGroup.resourceGroup.Data.Name, this);
+    }
+
+    public async Task<AzureWebApp> DeployAppService(string projectDirectory, string name)
+    {
+        var zipFilePath = CreateAzureFunctionZipFile(projectDirectory);
+        var resourceGroup = await CreateResourceGroup(name);
+        // Ensure App Service Plan name is unique per deployment
+        var appServicePlanName = $"{name.ToLower()}-plan-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
+        var appServicePlanData = new AppServicePlanData(resourceGroup.resourceGroup.Data.Location)
+        {
+            Sku = new AppServiceSkuDescription { Name = "B1", Tier = "Basic" },
+            Kind = "app,linux",
+            IsReserved = true // Use Linux
+        };
+        var appServicePlan = await resourceGroup.resourceGroup.GetAppServicePlans().CreateOrUpdateAsync(
+            WaitUntil.Completed, appServicePlanName, appServicePlanData);
+
+        var appSettings = new List<AppServiceNameValuePair>
+        {
+            new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") }
+        };
+        var webAppData = new WebSiteData(resourceGroup.resourceGroup.Data.Location)
+        {
+            AppServicePlanId = appServicePlan.Value.Id,
+            Kind = "app,linux",
+            SiteConfig = new SiteConfigProperties
+            {
+                AppSettings = appSettings,
+                LinuxFxVersion = "DOTNETCORE|8.0"
+            }
+        };
+        var webApp = await resourceGroup.resourceGroup.GetWebSites().CreateOrUpdateAsync(
+            WaitUntil.Completed, name, webAppData);
+
+        var httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromMinutes(10)
+        };
+        var url = $"https://{name.ToLower()}.scm.azurewebsites.net/api/zipdeploy";
+        using var fileStream = new FileStream(zipFilePath, FileMode.Open);
+        using var content = new StreamContent(fileStream);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
+        var accessToken = await _azureCredentials.GetTokenAsync(new TokenRequestContext(["https://management.azure.com/.default"]));
+        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
+        var response = await httpClient.PostAsync(url, content);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new Exception($"App Service deployment failed: {response.StatusCode} {await response.Content.ReadAsStringAsync()}");
+        }
+        return new AzureWebApp(webApp.Value, resourceGroup.resourceGroup.Data.Name, this);
     }
 
     //TODO: use project name instead of project directory
@@ -262,17 +312,34 @@ public class AzureCloud
 
     private void PublishUsingMsBuild4(FileInfo projectFile, string publishDirectory)
     {
+            Console.WriteLine("Publishing project: {0}", projectFile.FullName);
+            Console.WriteLine("Publish directory: {0}", publishDirectory);
+            
             var globalProperties = new Dictionary<string, string>
             {
                 { "Configuration", "Release" },
-                { "OutputPath", publishDirectory },
-                { "MSBuildSDKsPath", @"/usr/share/dotnet/sdk" } // Adjust the path to your .NET SDK location
+                { "PublishDir", publishDirectory }
             };
 
             var projectCollection = new ProjectCollection(globalProperties);
-            projectCollection.RegisterLogger(new ConsoleLogger(LoggerVerbosity.Minimal));
+            var logger = new ConsoleLogger(LoggerVerbosity.Normal);
+            projectCollection.RegisterLogger(logger);
+            
             var project = projectCollection.LoadProject(projectFile.FullName);
-            project.Build("Publish");
+            Console.WriteLine("Project loaded successfully. Available targets:");
+            foreach (var target in project.Targets.Keys)
+            {
+                Console.WriteLine("  - {0}", target);
+            }
+            
+            var buildResult = project.Build("Publish");
+            
+            if (!buildResult)
+            {
+                throw new InvalidOperationException($"Project publish failed for {projectFile.FullName}. Check build output above for details.");
+            }
+            
+            Console.WriteLine("Project published successfully to: {0}", publishDirectory);
     }
 
     public FileInfo GetProjectFile(string projectDirectory)
@@ -389,6 +456,28 @@ public class AzureFunction : IAsyncDisposable
 
     public string Name => _functionApp.Data.Name;
     public string Url => _functionApp.Data.DefaultHostName;
+
+    public async ValueTask DisposeAsync()
+    {
+        await _azureCloud.DeleteResourceGroup(_resourceGroupName);
+    }
+}
+
+public class AzureWebApp : IAsyncDisposable
+{
+    private readonly WebSiteResource _webApp;
+    private readonly string _resourceGroupName;
+    private readonly AzureCloud _azureCloud;
+
+    public AzureWebApp(WebSiteResource webApp, string resourceGroupName, AzureCloud azureCloud)
+    {
+        _webApp = webApp;
+        _resourceGroupName = resourceGroupName;
+        _azureCloud = azureCloud;
+    }
+
+    public string Name => _webApp.Data.Name;
+    public string Url => _webApp.Data.DefaultHostName;
 
     public async ValueTask DisposeAsync()
     {
