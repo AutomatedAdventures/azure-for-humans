@@ -21,6 +21,10 @@ public class AzureCloud
     private readonly SubscriptionResource _subscription;
     // Changed region from WestEurope to NorthEurope to avoid capacity issues
     private readonly AzureLocation _location = AzureLocation.NorthEurope;
+    
+    // Static lock and flag for MSBuild registration to ensure thread safety
+    private static readonly object MSBuildLock = new object();
+    private static bool MSBuildRegistered = false;
 
     public AzureCloud()
     {
@@ -43,7 +47,7 @@ public class AzureCloud
 
     public async Task<AzureFunction> DeployAzureFunction(string projectDirectory, string name, Dictionary<string, string>? environmentVariables = null)
     {
-        var zipFilePath = CreateDeploymentZipFile(projectDirectory);
+        var zipFilePath = CreateDeploymentZipFile(projectDirectory, name);
         var resourceGroup = await CreateResourceGroup(name);
         var storageAccount = await resourceGroup.CreateStorageAccount(name);
         var appServicePlan = await resourceGroup.CreateAppServicePlan(name);    
@@ -88,7 +92,7 @@ public class AzureCloud
 
     public async Task<AzureWebApp> DeployAppService(string projectDirectory, string name, Dictionary<string, string>? environmentVariables = null)
     {
-        var zipFilePath = CreateDeploymentZipFile(projectDirectory);
+        var zipFilePath = CreateDeploymentZipFile(projectDirectory, name);
         var resourceGroup = await CreateResourceGroup(name);
         // Ensure App Service Plan name is unique per deployment
         var appServicePlanName = $"{name.ToLower()}-plan-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
@@ -212,11 +216,11 @@ public class AzureCloud
     }
 
     //TODO: use project name instead of project directory
-    private string CreateDeploymentZipFile(string projectDirectory)
+    private string CreateDeploymentZipFile(string projectDirectory, string serviceName)
     {
-        var publishDirectory = PublishProject(projectDirectory);
+        var publishDirectory = PublishProject(projectDirectory, serviceName);
 
-        var destinationZipFile = Path.Combine(Path.GetTempPath(), "AzureFunctionPublish", Path.GetFileName(projectDirectory), "zip", $"{Path.GetFileName(projectDirectory)}.zip");
+        var destinationZipFile = Path.Combine(Path.GetTempPath(), "AzureFunctionPublish", serviceName, "zip", $"{Path.GetFileName(projectDirectory)}.zip");
 
         var destinationZipDirectory = Path.GetDirectoryName(destinationZipFile);
         if (!string.IsNullOrEmpty(destinationZipDirectory) && !Directory.Exists(destinationZipDirectory))
@@ -244,20 +248,27 @@ public class AzureCloud
 
     //TODO: refactor to use DirectoryInfo instead of string
     //TODO: get project paths from solution or from root directory
-    private DirectoryInfo PublishProject(string projectDirectory)
+    private DirectoryInfo PublishProject(string projectDirectory, string serviceName)
     {
         var projectFile = GetProjectFile(projectDirectory);
-        var publishDirectory = DefinePublishDirectory(projectDirectory); 
+        var publishDirectory = DefinePublishDirectory(projectDirectory, serviceName); 
 
-        MSBuildLocator.RegisterDefaults();
+        lock (MSBuildLock)
+        {
+            if (!MSBuildRegistered)
+            {
+                MSBuildLocator.RegisterDefaults();
+                MSBuildRegistered = true;
+            }
+        }
 
         PublishProjectUsingMsBuild(projectFile, publishDirectory);
         return new DirectoryInfo(publishDirectory);
     }
 
-    private string DefinePublishDirectory(string projectDirectory)
+    private string DefinePublishDirectory(string projectDirectory, string serviceName)
     {
-        var publishDirectory = Path.Combine(Path.GetTempPath(), "AzureFunctionPublish", Path.GetFileName(projectDirectory), "publish");
+        var publishDirectory = Path.Combine(Path.GetTempPath(), "AzureFunctionPublish", serviceName, "publish");
         if (Directory.Exists(publishDirectory))
         {
             Directory.Delete(publishDirectory, true);
