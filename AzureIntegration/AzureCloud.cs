@@ -6,12 +6,8 @@ using Azure.ResourceManager;
 using Azure.ResourceManager.AppService;
 using Azure.ResourceManager.AppService.Models;
 using Azure.ResourceManager.Resources;
-using Azure.ResourceManager.Storage;
-using Azure.ResourceManager.Storage.Models;
 using Microsoft.Build.Locator;
-using Microsoft.Build.Construction;
 using Microsoft.Build.Evaluation;
-using Microsoft.Build.Execution;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Logging;
 using System.Net.Http.Headers;
@@ -123,7 +119,7 @@ public class AzureCloud
         return new AzureFunction(functionApp.Value, resourceGroup.resourceGroup.Data.Name, this);
     }
 
-    public async Task<AzureWebApp> DeployAppService(string projectDirectory, string name)
+    public async Task<AzureWebApp> DeployAppService(string projectDirectory, string name, Dictionary<string, string>? environmentVariables = null)
     {
         var zipFilePath = CreateAzureFunctionZipFile(projectDirectory);
         var resourceGroup = await CreateResourceGroup(name);
