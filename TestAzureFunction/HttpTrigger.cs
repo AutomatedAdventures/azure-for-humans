@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 
-namespace azure.functions.sample
+namespace TestAzureFunction
 {
     public class HttpTrigger
     {
@@ -22,23 +22,23 @@ namespace azure.functions.sample
         }
 
         [Function("Variable")]
-        public IActionResult GetVariable(
+        public static IActionResult GetVariable(
             [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "variable/{name}")] HttpRequest req,
             string name)
         {
-            var value = Environment.GetEnvironmentVariable(name);
-            if (value == null)
-                return new NotFoundResult();
-            return new OkObjectResult(value);
+            string? value = Environment.GetEnvironmentVariable(name);
+            return value == null 
+                       ? new NotFoundResult() 
+                       : new OkObjectResult(value);
         }
 
         [Function("Variables")]
-        public IActionResult GetVariables(
+        public static IActionResult GetVariables(
             [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "variables")] HttpRequest req)
         {
             var envVars = Environment.GetEnvironmentVariables();
             var dict = new Dictionary<string, string>();
-            foreach (var key in envVars.Keys)
+            foreach (object? key in envVars.Keys)
             {
                 dict[key.ToString()!] = envVars[key]?.ToString() ?? string.Empty;
             }
