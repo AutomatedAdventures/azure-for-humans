@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using Azure.Identity;
 using AzureIntegration;
 
 namespace AzureTests;
@@ -22,6 +23,19 @@ public class Tests
         var azure = new AzureCloud();
         var resourceGroups = azure.GetResourceGroups().Result;
         Assert.That(resourceGroups.Count, Is.GreaterThan(0));
+    }
+
+    [Test]
+    public void PassUserTokenCredentials(){
+        var azure = new AzureCloud(new DefaultAzureCredential());
+        var resourceGroups = azure.GetResourceGroups().Result;
+        Assert.That(resourceGroups.Count, Is.GreaterThan(0));
+    }
+
+    [Test]
+    public void PassInvalidCredentials(){
+        var azure = new AzureCloud(new ClientSecretCredential("invalid-client-id", "invalid-client-secret", "invalid-tenant-id"));
+        Assert.ThrowsAsync<AuthenticationFailedException>(() => azure.GetResourceGroups());
     }
 
     [Test]

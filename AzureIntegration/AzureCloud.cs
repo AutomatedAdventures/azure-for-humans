@@ -17,10 +17,9 @@ namespace AzureIntegration;
 
 public class AzureCloud
 {
-    private readonly DefaultAzureCredential _azureCredentials;
-
-    private readonly SubscriptionResource _subscription;
-
+    private readonly TokenCredential _azureCredentials;
+    private readonly ArmClient _armClient;
+    private SubscriptionResource _subscription;
     // Changed region from WestEurope to NorthEurope to avoid capacity issues
     private readonly AzureLocation _location = AzureLocation.NorthEurope;
 
@@ -31,23 +30,49 @@ public class AzureCloud
     // Static lock for MSBuild operations to prevent concurrent builds
     private static readonly object MsBuildOperationLock = new();
 
-    public AzureCloud()
+    public AzureCloud() : this(new DefaultAzureCredential())
     {
-        _azureCredentials = new DefaultAzureCredential();
-        var armClient = new ArmClient(_azureCredentials);
-        _subscription = armClient.GetDefaultSubscriptionAsync().Result;
+    }
+
+    public AzureCloud(TokenCredential credentials)
+    {
+        _azureCredentials = credentials;
+        _armClient = new ArmClient(_azureCredentials);
+        _subscription = null!;
+    }
+
+    private async Task<SubscriptionResource> GetSubscriptionAsync()
+    {
+        if (_subscription == null)
+        {
+            try
+            {
+                _subscription = await _armClient.GetDefaultSubscriptionAsync();
+            }
+            catch (AuthenticationFailedException)
+            {
+                throw new AuthenticationFailedException("Invalid credentials provided. Please check your client ID, client secret, and tenant ID.");
+            }
+            catch (Exception ex) when (ex.InnerException is AuthenticationFailedException)
+            {
+                throw new AuthenticationFailedException("Invalid credentials provided. Please check your client ID, client secret, and tenant ID.");
+            }
+        }
+        return _subscription;
     }
 
     public async Task<ResourceGroup> CreateResourceGroup(string name)
     {
+        var subscription = await GetSubscriptionAsync();
         var resourceGroupData = new ResourceGroupData(_location);
-        var operationResult = await _subscription.GetResourceGroups().CreateOrUpdateAsync(WaitUntil.Completed, name, resourceGroupData);
+        var operationResult = await subscription.GetResourceGroups().CreateOrUpdateAsync(WaitUntil.Completed, name, resourceGroupData);
         return new ResourceGroup(operationResult.Value);
     }
 
     public async Task DeleteResourceGroup(string name)
     {
-        var resourceGroup = (await _subscription.GetResourceGroups().GetAsync(name)).Value;
+        var subscription = await GetSubscriptionAsync();
+        var resourceGroup = (await subscription.GetResourceGroups().GetAsync(name)).Value;
         await resourceGroup.DeleteAsync(WaitUntil.Completed);
     }
 
@@ -148,7 +173,7 @@ public class AzureCloud
         await using var fileStream = new FileStream(zipFilePath, FileMode.Open, FileAccess.Read);
         using var content = new StreamContent(fileStream);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
-        var accessToken = await _azureCredentials.GetTokenAsync(new TokenRequestContext(["https://management.azure.com/.default"]));
+        var accessToken = await _azureCredentials.GetTokenAsync(new TokenRequestContext(["https://management.azure.com/.default"]), CancellationToken.None);
         httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
 
         Console.WriteLine($"Deploying zip file to {serviceName}...");
@@ -332,8 +357,9 @@ public class AzureCloud
 
     public async Task<IEnumerable<ResourceGroup>> GetResourceGroups()
     {
+        var subscription = await GetSubscriptionAsync();
         var resourceGroups = new List<ResourceGroup>();
-        await foreach (var resourceGroup in _subscription.GetResourceGroups().GetAllAsync())
+        await foreach (var resourceGroup in subscription.GetResourceGroups().GetAllAsync())
         {
             resourceGroups.Add(new ResourceGroup(resourceGroup));
         }
