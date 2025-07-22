@@ -2,24 +2,23 @@ using Azure.ResourceManager.AppService;
 
 namespace AzureIntegration;
 
-public class AzureFunction : IAsyncDisposable
+public class AzureFunction(WebSiteResource functionApp, string resourceGroupName, AzureCloud azureCloud)
+    : IAsyncDisposable
 {
-    private readonly WebSiteResource _functionApp;
-    private readonly string _resourceGroupName;
-    private readonly AzureCloud _azureCloud;
-
-    public AzureFunction(WebSiteResource functionApp, string resourceGroupName, AzureCloud azureCloud)
-    {
-        _functionApp = functionApp;
-        _resourceGroupName = resourceGroupName;
-        _azureCloud = azureCloud;
-    }
-
-    public string Name => _functionApp.Data.Name;
-    public string Url => _functionApp.Data.DefaultHostName;
+    public string Name => functionApp.Data.Name;
+    public string Url => functionApp.Data.DefaultHostName;
 
     public async ValueTask DisposeAsync()
     {
-        await _azureCloud.DeleteResourceGroup(_resourceGroupName);
+        await DisposeAsync(true);
+        GC.SuppressFinalize(this);
+    }
+
+    private async ValueTask DisposeAsync(bool deleteResourceGroup)
+    {
+        if (deleteResourceGroup)
+        {
+            await azureCloud.DeleteResourceGroup(resourceGroupName);
+        }
     }
 }

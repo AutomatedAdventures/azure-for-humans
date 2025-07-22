@@ -3,22 +3,14 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 
-namespace azure.functions.sample
+namespace AzureFunctionSample;
+
+public class HttpTrigger(ILogger<HttpTrigger> logger)
 {
-    public class HttpTrigger
+    [Function("HttpTrigger")]
+    public IActionResult Run([HttpTrigger(AuthorizationLevel.Anonymous, "get", "post")] HttpRequest req)
     {
-        private readonly ILogger<HttpTrigger> _logger;
-
-        public HttpTrigger(ILogger<HttpTrigger> logger)
-        {
-            _logger = logger;
-        }
-
-        [Function("HttpTrigger")]
-        public IActionResult Run([HttpTrigger(AuthorizationLevel.Anonymous, "get", "post")] HttpRequest req)
-        {
-            _logger.LogInformation("C# HTTP trigger function processed a request.");
-            return new OkObjectResult("Azure Functions Sample test result");
-        }
+        logger.LogInformation("C# HTTP trigger function processed a request.");
+        return new OkObjectResult("Azure Functions Sample test result");
     }
 }

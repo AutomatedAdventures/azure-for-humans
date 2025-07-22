@@ -1,4 +1,6 @@
-﻿using System.IO.Compression;
+﻿using System.Diagnostics;
+using System.IO.Compression;
+using System.Net.Http.Headers;
 using Azure;
 using Azure.Core;
 using Azure.Identity;
@@ -6,11 +8,10 @@ using Azure.ResourceManager;
 using Azure.ResourceManager.AppService;
 using Azure.ResourceManager.AppService.Models;
 using Azure.ResourceManager.Resources;
-using Microsoft.Build.Locator;
 using Microsoft.Build.Evaluation;
 using Microsoft.Build.Framework;
+using Microsoft.Build.Locator;
 using Microsoft.Build.Logging;
-using System.Net.Http.Headers;
 
 namespace AzureIntegration;
 
@@ -21,13 +22,13 @@ public class AzureCloud
     private SubscriptionResource _subscription;
     // Changed region from WestEurope to NorthEurope to avoid capacity issues
     private readonly AzureLocation _location = AzureLocation.NorthEurope;
-    
+
     // Static lock and flag for MSBuild registration to ensure thread safety
-    private static readonly object MSBuildLock = new object();
-    private static bool MSBuildRegistered = false;
-    
+    private static readonly object MsBuildLock = new();
+    private static bool _msBuildRegistered;
+
     // Static lock for MSBuild operations to prevent concurrent builds
-    private static readonly object MSBuildOperationLock = new object();
+    private static readonly object MsBuildOperationLock = new();
 
     public AzureCloud() : this(new DefaultAzureCredential())
     {
@@ -71,44 +72,46 @@ public class AzureCloud
     public async Task DeleteResourceGroup(string name)
     {
         var subscription = await GetSubscriptionAsync();
-        await subscription.GetResourceGroups().Get(name).Value.DeleteAsync(WaitUntil.Completed);
+        var resourceGroup = (await subscription.GetResourceGroups().GetAsync(name)).Value;
+        await resourceGroup.DeleteAsync(WaitUntil.Completed);
     }
 
-    public async Task<AzureFunction> DeployAzureFunction(string projectDirectory, string name, Dictionary<string, string>? environmentVariables = null)
+    public async Task<AzureFunction> DeployAzureFunction(
+        string projectDirectory, string name, Dictionary<string, string>? environmentVariables = null)
     {
-        var zipFilePath = CreateDeploymentZipFile(projectDirectory, name);
+        string zipFilePath = CreateDeploymentZipFile(projectDirectory, name);
         var resourceGroup = await CreateResourceGroup(name);
         var storageAccount = await resourceGroup.CreateStorageAccount(name);
-        var appServicePlan = await resourceGroup.CreateAppServicePlan(name);    
-        
+        var appServicePlan = await resourceGroup.CreateAppServicePlan(name);
+
         //TODO: Create application insights
 
         var appSettings = new List<AppServiceNameValuePair>
-        {
-            new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") },
-            new() { Name = "AzureWebJobsStorage", Value = storageAccount.ConnectionString },
-            new() { Name = "WEBSITE_RUN_FROM_PACKAGE", Value = "1"},
-            new() { Name = "FUNCTIONS_EXTENSION_VERSION", Value = "~4" },
-            new() { Name = "FUNCTIONS_WORKER_RUNTIME", Value = "dotnet-isolated" },
-            new() { Name = "SCM_DO_BUILD_DURING_DEPLOYMENT", Value = "0" },
-            new() { Name = "WEBSITE_USE_PLACEHOLDER_DOTNETISOLATED", Value = "1" },
-            new() { Name = "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING", Value = storageAccount.ConnectionString },
-            new() { Name = "WEBSITE_CONTENTSHARE", Value = name.ToLower() }
-        };
+                          {
+                              new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") },
+                              new() { Name = "AzureWebJobsStorage", Value = storageAccount.ConnectionString },
+                              new() { Name = "WEBSITE_RUN_FROM_PACKAGE", Value = "1" },
+                              new() { Name = "FUNCTIONS_EXTENSION_VERSION", Value = "~4" },
+                              new() { Name = "FUNCTIONS_WORKER_RUNTIME", Value = "dotnet-isolated" },
+                              new() { Name = "SCM_DO_BUILD_DURING_DEPLOYMENT", Value = "0" },
+                              new() { Name = "WEBSITE_USE_PLACEHOLDER_DOTNETISOLATED", Value = "1" },
+                              new() { Name = "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING", Value = storageAccount.ConnectionString },
+                              new() { Name = "WEBSITE_CONTENTSHARE", Value = name.ToLower() }
+                          };
         appSettings = AddEnvironmentVariablesToAppSettings(appSettings, environmentVariables);
-        var functionAppData = new WebSiteData(resourceGroup.resourceGroup.Data.Location)
-        {
-            AppServicePlanId = appServicePlan.Id,
-            Kind = "functionapp,linux",
-            SiteConfig = new SiteConfigProperties
-            {
-                AppSettings = appSettings,
-                LinuxFxVersion = "DOTNET-ISOLATED|8.0",
-            }
-        };
+        var functionAppData = new WebSiteData(resourceGroup.Resource.Data.Location)
+                              {
+                                  AppServicePlanId = appServicePlan.Id,
+                                  Kind = "functionapp,linux",
+                                  SiteConfig = new SiteConfigProperties
+                                               {
+                                                   AppSettings = appSettings,
+                                                   LinuxFxVersion = "DOTNET-ISOLATED|8.0",
+                                               }
+                              };
 
-        var functionApp = await resourceGroup.resourceGroup.GetWebSites().CreateOrUpdateAsync(
-            WaitUntil.Completed, name, functionAppData);
+        var functionApp = await resourceGroup.Resource.GetWebSites().CreateOrUpdateAsync(
+                              WaitUntil.Completed, name, functionAppData);
 
         //TODO: link application insights
 
@@ -116,98 +119,100 @@ public class AzureCloud
 
         Console.WriteLine($"Function App '{functionApp.Value.Data.Name}' created successfully.");
 
-        return new AzureFunction(functionApp.Value, resourceGroup.resourceGroup.Data.Name, this);
+        return new AzureFunction(functionApp.Value, resourceGroup.Resource.Data.Name, this);
     }
 
     public async Task<AzureWebApp> DeployAppService(string projectDirectory, string name, Dictionary<string, string>? environmentVariables = null)
     {
-        var zipFilePath = CreateDeploymentZipFile(projectDirectory, name);
+        string zipFilePath = CreateDeploymentZipFile(projectDirectory, name);
         var resourceGroup = await CreateResourceGroup(name);
         // Ensure App Service Plan name is unique per deployment
-        var appServicePlanName = $"{name.ToLower()}-plan-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
-        var appServicePlanData = new AppServicePlanData(resourceGroup.resourceGroup.Data.Location)
-        {
-            Sku = new AppServiceSkuDescription { Name = "B1", Tier = "Basic" },
-            Kind = "app,linux",
-            IsReserved = true // Use Linux
-        };
-        var appServicePlan = await resourceGroup.resourceGroup.GetAppServicePlans().CreateOrUpdateAsync(
-            WaitUntil.Completed, appServicePlanName, appServicePlanData);
+        string appServicePlanName = $"{name.ToLower()}-plan-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
+        var appServicePlanData = new AppServicePlanData(resourceGroup.Resource.Data.Location)
+                                 {
+                                     Sku = new AppServiceSkuDescription { Name = "B1", Tier = "Basic" },
+                                     Kind = "app,linux",
+                                     IsReserved = true // Use Linux
+                                 };
+        var appServicePlan = await resourceGroup.Resource.GetAppServicePlans().CreateOrUpdateAsync(
+                                 WaitUntil.Completed, appServicePlanName, appServicePlanData);
 
         var appSettings = new List<AppServiceNameValuePair>
-        {
-            new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") }
-        };
+                          {
+                              new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") }
+                          };
         appSettings = AddEnvironmentVariablesToAppSettings(appSettings, environmentVariables);
-        var webAppData = new WebSiteData(resourceGroup.resourceGroup.Data.Location)
-        {
-            AppServicePlanId = appServicePlan.Value.Id,
-            Kind = "app,linux",
-            SiteConfig = new SiteConfigProperties
-            {
-                AppSettings = appSettings,
-                LinuxFxVersion = "DOTNETCORE|8.0"
-            }
-        };
-        var webApp = await resourceGroup.resourceGroup.GetWebSites().CreateOrUpdateAsync(
-            WaitUntil.Completed, name, webAppData);
+        var webAppData = new WebSiteData(resourceGroup.Resource.Data.Location)
+                         {
+                             AppServicePlanId = appServicePlan.Value.Id,
+                             Kind = "app,linux",
+                             SiteConfig = new SiteConfigProperties
+                                          {
+                                              AppSettings = appSettings,
+                                              LinuxFxVersion = "DOTNETCORE|8.0"
+                                          }
+                         };
+        var webApp = await resourceGroup.Resource.GetWebSites().CreateOrUpdateAsync(
+                         WaitUntil.Completed, name, webAppData);
 
         await DeployZipFile(zipFilePath, name);
 
         // Wait for the App Service to be ready to receive HTTP requests
         await WaitForAppServiceToBeReady(webApp.Value.Data.DefaultHostName);
 
-        return new AzureWebApp(webApp.Value, resourceGroup.resourceGroup.Data.Name, this);
+        return new AzureWebApp(webApp.Value, resourceGroup.Resource.Data.Name, this);
     }
 
     private async Task DeployZipFile(string zipFilePath, string serviceName)
     {
         var httpClient = new HttpClient
-        {
-            Timeout = TimeSpan.FromMinutes(10)
-        };
-        var url = $"https://{serviceName.ToLower()}.scm.azurewebsites.net/api/zipdeploy";
-        using var fileStream = new FileStream(zipFilePath, FileMode.Open, FileAccess.Read);
+                         {
+                             Timeout = TimeSpan.FromMinutes(10)
+                         };
+        string url = $"https://{serviceName.ToLower()}.scm.azurewebsites.net/api/zipdeploy";
+        await using var fileStream = new FileStream(zipFilePath, FileMode.Open, FileAccess.Read);
         using var content = new StreamContent(fileStream);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
         var accessToken = await _azureCredentials.GetTokenAsync(new TokenRequestContext(["https://management.azure.com/.default"]), CancellationToken.None);
         httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
-        
+
         Console.WriteLine($"Deploying zip file to {serviceName}...");
         var response = await httpClient.PostAsync(url, content);
-        
+
         if (!response.IsSuccessStatusCode)
         {
-            var errorContent = await response.Content.ReadAsStringAsync();
+            string errorContent = await response.Content.ReadAsStringAsync();
             throw new Exception($"Deployment failed for {serviceName}: {response.StatusCode} {errorContent}");
         }
-        
+
         Console.WriteLine($"Zip file deployed successfully to {serviceName}");
     }
 
-    private List<AppServiceNameValuePair> AddEnvironmentVariablesToAppSettings(
-        List<AppServiceNameValuePair> baseSettings, 
+    private static List<AppServiceNameValuePair> AddEnvironmentVariablesToAppSettings(
+        List<AppServiceNameValuePair> baseSettings,
         Dictionary<string, string>? environmentVariables)
     {
         var appSettings = new List<AppServiceNameValuePair>(baseSettings);
-        
-        if (environmentVariables != null)
+
+        if (environmentVariables == null)
         {
-            foreach (var kvp in environmentVariables)
-            {
-                appSettings.Add(new AppServiceNameValuePair { Name = kvp.Key, Value = kvp.Value });
-            }
+            return appSettings;
         }
-        
+
+        foreach (var kvp in environmentVariables)
+        {
+            appSettings.Add(new AppServiceNameValuePair { Name = kvp.Key, Value = kvp.Value });
+        }
+
         return appSettings;
     }
 
-    private async Task WaitForAppServiceToBeReady(string hostName, int timeoutMinutes = 10, int intervalSeconds = 30)
+    private static async Task WaitForAppServiceToBeReady(string hostName, int timeoutMinutes = 10, int intervalSeconds = 30)
     {
-        var appUrl = $"https://{hostName}";
+        string appUrl = $"https://{hostName}";
         var timeout = TimeSpan.FromMinutes(timeoutMinutes);
         var interval = TimeSpan.FromSeconds(intervalSeconds);
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var stopwatch = Stopwatch.StartNew();
 
         Console.WriteLine($"Waiting for App Service to be ready at: {appUrl}");
 
@@ -220,13 +225,13 @@ public class AzureCloud
             {
                 Console.WriteLine($"Checking App Service health... (elapsed: {stopwatch.Elapsed:mm\\:ss})");
                 var response = await httpClient.GetAsync(appUrl);
-                
+
                 if (response.IsSuccessStatusCode)
                 {
                     Console.WriteLine($"App Service is ready! Status: {response.StatusCode}");
                     return;
                 }
-                
+
                 Console.WriteLine($"App Service not ready yet. Status: {response.StatusCode}");
             }
             catch (Exception ex)
@@ -245,13 +250,14 @@ public class AzureCloud
     }
 
     //TODO: use project name instead of project directory
-    private string CreateDeploymentZipFile(string projectDirectory, string serviceName)
+    private static string CreateDeploymentZipFile(string projectDirectory, string serviceName)
     {
         var publishDirectory = PublishProject(projectDirectory, serviceName);
 
-        var destinationZipFile = Path.Combine(Path.GetTempPath(), "AzureFunctionPublish", serviceName, "zip", $"{Path.GetFileName(projectDirectory)}.zip");
+        string destinationZipFile = Path.Combine(
+            Path.GetTempPath(), "AzureFunctionPublish", serviceName, "zip", $"{Path.GetFileName(projectDirectory)}.zip");
 
-        var destinationZipDirectory = Path.GetDirectoryName(destinationZipFile);
+        string? destinationZipDirectory = Path.GetDirectoryName(destinationZipFile);
         if (!string.IsNullOrEmpty(destinationZipDirectory) && !Directory.Exists(destinationZipDirectory))
         {
             Directory.CreateDirectory(destinationZipDirectory);
@@ -277,17 +283,17 @@ public class AzureCloud
 
     //TODO: refactor to use DirectoryInfo instead of string
     //TODO: get project paths from solution or from root directory
-    private DirectoryInfo PublishProject(string projectDirectory, string serviceName)
+    private static DirectoryInfo PublishProject(string projectDirectory, string serviceName)
     {
         var projectFile = GetProjectFile(projectDirectory);
-        var publishDirectory = DefinePublishDirectory(projectDirectory, serviceName); 
+        string publishDirectory = DefinePublishDirectory(serviceName);
 
-        lock (MSBuildLock)
+        lock (MsBuildLock)
         {
-            if (!MSBuildRegistered)
+            if (!_msBuildRegistered)
             {
                 MSBuildLocator.RegisterDefaults();
-                MSBuildRegistered = true;
+                _msBuildRegistered = true;
             }
         }
 
@@ -295,9 +301,9 @@ public class AzureCloud
         return new DirectoryInfo(publishDirectory);
     }
 
-    private string DefinePublishDirectory(string projectDirectory, string serviceName)
+    private static string DefinePublishDirectory(string serviceName)
     {
-        var publishDirectory = Path.Combine(Path.GetTempPath(), "AzureFunctionPublish", serviceName, "publish");
+        string publishDirectory = Path.Combine(Path.GetTempPath(), "AzureFunctionPublish", serviceName, "publish");
         if (Directory.Exists(publishDirectory))
         {
             Directory.Delete(publishDirectory, true);
@@ -308,38 +314,39 @@ public class AzureCloud
         return publishDirectory;
     }
 
-    private void PublishProjectUsingMsBuild(FileInfo projectFile, string publishDirectory)
+    private static void PublishProjectUsingMsBuild(FileInfo projectFile, string publishDirectory)
     {
         Console.WriteLine($"Publishing {projectFile.Name} to {publishDirectory}");
-        
-        lock (MSBuildOperationLock)
+
+        lock (MsBuildOperationLock)
         {
             var globalProperties = new Dictionary<string, string>
-            {
-                { "Configuration", "Release" },
-                { "OutputPath", publishDirectory },
-                { "MSBuildSDKsPath", @"/usr/share/dotnet/sdk" } // Adjust the path to your .NET SDK location
-            };
+                                   {
+                                       { "Configuration", "Release" },
+                                       { "OutputPath", publishDirectory },
+                                       { "MSBuildSDKsPath", @"/usr/share/dotnet/sdk" } // Adjust the path to your .NET SDK location
+                                   };
 
             var projectCollection = new ProjectCollection(globalProperties);
             var logger = new ConsoleLogger(LoggerVerbosity.Normal);
             projectCollection.RegisterLogger(logger);
             var project = projectCollection.LoadProject(projectFile.FullName);
-            var buildResult = project.Build("Publish");
-            
+            bool buildResult = project.Build("Publish");
+
             if (!buildResult)
             {
                 throw new InvalidOperationException($"Project publish failed for {projectFile.FullName}. Check build output above for details.");
             }
         }
-        
+
         Console.WriteLine("Project published successfully to: {0}", publishDirectory);
     }
 
-    public FileInfo GetProjectFile(string projectDirectory)
+    private static FileInfo GetProjectFile(string projectDirectory)
     {
         var currentDirectory = new DirectoryInfo(Directory.GetCurrentDirectory());
-        var projectFile = currentDirectory!.Parent!.Parent!.Parent!.Parent!.GetFiles($"{projectDirectory}.csproj", SearchOption.AllDirectories).FirstOrDefault();
+        var projectFile = currentDirectory.Parent!.Parent!.Parent!.Parent!.GetFiles($"{projectDirectory}.csproj", SearchOption.AllDirectories)
+            .FirstOrDefault();
         if (projectFile == null)
         {
             throw new FileNotFoundException("Project file not found", projectDirectory);
@@ -356,6 +363,7 @@ public class AzureCloud
         {
             resourceGroups.Add(new ResourceGroup(resourceGroup));
         }
+
         return resourceGroups;
     }
 }
