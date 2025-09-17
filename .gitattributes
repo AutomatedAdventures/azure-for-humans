@@ -1,0 +1,6 @@
+# Todo texto con LF tanto en el repo como en el working tree, en cualquier SO
+* text=auto eol=lf
+
+# Excepciones: scripts de Windows que sí necesitan CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
