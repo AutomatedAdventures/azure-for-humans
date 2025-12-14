@@ -163,6 +163,14 @@ public class AzureCloud
         return new AzureWebApp(webApp.Value, resourceGroup.Resource.Data.Name, this);
     }
 
+    public Task<AzureContainerApp> DeployContainerApp(
+        string projectDirectory,
+        string name,
+        Dictionary<string, string>? environmentVariables = null)
+    {
+        throw new NotImplementedException();
+    }
+
     private async Task DeployZipFile(string zipFilePath, string serviceName)
     {
         var httpClient = new HttpClient
