@@ -182,12 +182,9 @@ public class AzureCloud
         
         var environment = await CreateContainerAppsEnvironment(resourceGroup, name);
         var containerApp = await CreateContainerApp(resourceGroup, environment, acr, name, imageName, environmentVariables);
-        
-        string fqdn = containerApp.Data.Configuration.Ingress.Fqdn;
-        await WaitForContainerAppToBeReady(fqdn);
 
-        DeploymentLogger.Log($"Deployment complete: https://{fqdn}");
-        return new AzureContainerApp(containerApp.Data.Name, fqdn, resourceGroup.Resource.Data.Name, this);
+        DeploymentLogger.Log($"Deployment complete: {containerApp.Url}");
+        return containerApp;
     }
 
     private static DirectoryInfo ValidateProjectDirectory(string projectDirectory)
@@ -236,6 +233,167 @@ public class AzureCloud
         return $"{loginServer}/{name.ToLower()}:latest";
     }
 
+    private static async Task BuildAndPushDockerImage(
+        DirectoryInfo projectDir,
+        string acrLoginServer,
+        string acrUsername,
+        string acrPassword,
+        string imageName)
+    {
+        await VerifyDockerAvailable();
+        await DockerLogin(acrLoginServer, acrUsername, acrPassword);
+        
+        string imageTag = $"{acrLoginServer}/{imageName}:latest";
+        await DockerBuild(projectDir, imageTag);
+        await DockerPush(imageTag);
+    }
+
+    private static async Task VerifyDockerAvailable()
+    {
+        DeploymentLogger.Log("Verifying Docker availability...");
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "docker",
+                Arguments = "version --format '{{.Server.Os}}'",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+        process.Start();
+        string output = await process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        
+        if (process.ExitCode != 0)
+        {
+            string error = await process.StandardError.ReadToEndAsync();
+            throw new Exception($"Docker is not available or not running: {error}");
+        }
+        DeploymentLogger.Log($"Docker available (OS: {output.Trim()})");
+    }
+
+    private static async Task DockerLogin(string server, string username, string password)
+    {
+        DeploymentLogger.Log($"Logging into ACR {server}...");
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "docker",
+                Arguments = $"login {server} -u {username} -p {password}",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+        process.Start();
+        string error = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        
+        if (process.ExitCode != 0)
+        {
+            throw new Exception($"Docker login failed: {error}");
+        }
+        DeploymentLogger.Log("Docker login successful");
+    }
+
+    private static async Task DockerBuild(DirectoryInfo projectDir, string imageTag)
+    {
+        DeploymentLogger.Log($"Building Docker image {imageTag}...");
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "docker",
+                Arguments = $"build --platform linux/amd64 -t {imageTag} .",
+                WorkingDirectory = projectDir.FullName,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+        process.Start();
+        
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        string error = await errorTask;
+        
+        if (process.ExitCode != 0)
+        {
+            DeploymentLogger.LogError($"Docker build failed: {error}");
+            throw new Exception($"Docker build failed with exit code {process.ExitCode}: {error}");
+        }
+        DeploymentLogger.Log("Docker build completed");
+    }
+
+    private static async Task DockerPush(string imageTag)
+    {
+        DeploymentLogger.Log("Pushing Docker image...");
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "docker",
+                Arguments = $"push {imageTag}",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+        process.Start();
+        
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        string error = await errorTask;
+        
+        if (process.ExitCode != 0)
+        {
+            DeploymentLogger.LogError($"Docker push failed: {error}");
+            throw new Exception($"Docker push failed with exit code {process.ExitCode}: {error}");
+        }
+        DeploymentLogger.Log("Docker image pushed successfully");
+    }
+
+    private static ContainerAppContainer BuildContainer(
+        string name, 
+        string imageName, 
+        Dictionary<string, string>? environmentVariables)
+    {
+        var container = new ContainerAppContainer
+        {
+            Name = name.ToLower(),
+            Image = imageName,
+            Resources = new AppContainerResources { Cpu = 0.5, Memory = "1Gi" }
+        };
+
+        container.Env.Add(new ContainerAppEnvironmentVariable 
+        { 
+            Name = "DEPLOYMENT_DATE", 
+            Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") 
+        });
+        container.Env.Add(new ContainerAppEnvironmentVariable 
+        { 
+            Name = "ASPNETCORE_URLS", 
+            Value = "http://+:8080" 
+        });
+
+        if (environmentVariables != null)
+        {
+            foreach (var kvp in environmentVariables)
+            {
+                container.Env.Add(new ContainerAppEnvironmentVariable { Name = kvp.Key, Value = kvp.Value });
+            }
+        }
+
+        return container;
+    }
+
     private async Task<ContainerAppManagedEnvironmentResource> CreateContainerAppsEnvironment(ResourceGroup resourceGroup, string name)
     {
         string environmentName = $"{name}-env";
@@ -249,7 +407,7 @@ public class AzureCloud
         return environment.Value;
     }
 
-    private async Task<ContainerAppResource> CreateContainerApp(
+    private async Task<AzureContainerApp> CreateContainerApp(
         ResourceGroup resourceGroup,
         ContainerAppManagedEnvironmentResource environment,
         ContainerRegistryResource acr,
@@ -301,158 +459,12 @@ public class AzureCloud
         var containerApp = await resourceGroup.Resource.GetContainerApps()
             .CreateOrUpdateAsync(WaitUntil.Completed, name, containerAppData);
 
-        DeploymentLogger.Log("Container App created");
-        return containerApp.Value;
-    }
-
-    private static ContainerAppContainer BuildContainer(
-        string name, 
-        string imageName, 
-        Dictionary<string, string>? environmentVariables)
-    {
-        var container = new ContainerAppContainer
-        {
-            Name = name.ToLower(),
-            Image = imageName,
-            Resources = new AppContainerResources { Cpu = 0.5, Memory = "1Gi" }
-        };
-
-        container.Env.Add(new ContainerAppEnvironmentVariable 
-        { 
-            Name = "DEPLOYMENT_DATE", 
-            Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") 
-        });
-        container.Env.Add(new ContainerAppEnvironmentVariable 
-        { 
-            Name = "ASPNETCORE_URLS", 
-            Value = "http://+:8080" 
-        });
-
-        if (environmentVariables != null)
-        {
-            foreach (var kvp in environmentVariables)
-            {
-                container.Env.Add(new ContainerAppEnvironmentVariable { Name = kvp.Key, Value = kvp.Value });
-            }
-        }
-
-        return container;
-    }
-
-    private static async Task BuildAndPushDockerImage(
-        DirectoryInfo projectDir,
-        string acrLoginServer,
-        string acrUsername,
-        string acrPassword,
-        string imageName)
-    {
-        // Verify Docker is available
-        DeploymentLogger.Log("Verifying Docker availability...");
-        var versionProcess = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = "version --format '{{.Server.Os}}'",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-        versionProcess.Start();
-        string versionOutput = await versionProcess.StandardOutput.ReadToEndAsync();
-        await versionProcess.WaitForExitAsync();
-        if (versionProcess.ExitCode != 0)
-        {
-            string versionError = await versionProcess.StandardError.ReadToEndAsync();
-            throw new Exception($"Docker is not available or not running: {versionError}");
-        }
-        DeploymentLogger.Log($"Docker available (OS: {versionOutput.Trim()})");
-
-        // Docker login
-        DeploymentLogger.Log($"Logging into ACR {acrLoginServer}...");
-        var loginProcess = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = $"login {acrLoginServer} -u {acrUsername} -p {acrPassword}",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-        loginProcess.Start();
-        string loginError = await loginProcess.StandardError.ReadToEndAsync();
-        await loginProcess.WaitForExitAsync();
-        if (loginProcess.ExitCode != 0)
-        {
-            throw new Exception($"Docker login failed: {loginError}");
-        }
-        DeploymentLogger.Log("Docker login successful");
-
-        // Docker build
-        string imageTag = $"{acrLoginServer}/{imageName}:latest";
-        DeploymentLogger.Log($"Building Docker image {imageTag}...");
+        string fqdn = containerApp.Value.Data.Configuration.Ingress.Fqdn;
+        DeploymentLogger.Log("Container App created, waiting for readiness...");
         
-        var buildProcess = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = $"build --platform linux/amd64 -t {imageTag} .",
-                WorkingDirectory = projectDir.FullName,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-        buildProcess.Start();
-        
-        var buildOutputTask = buildProcess.StandardOutput.ReadToEndAsync();
-        var buildErrorTask = buildProcess.StandardError.ReadToEndAsync();
-        await buildProcess.WaitForExitAsync();
-        
-        string buildError = await buildErrorTask;
-        
-        if (buildProcess.ExitCode != 0)
-        {
-            DeploymentLogger.LogError($"Docker build failed: {buildError}");
-            throw new Exception($"Docker build failed with exit code {buildProcess.ExitCode}: {buildError}");
-        }
-        DeploymentLogger.Log("Docker build completed");
+        await WaitForContainerAppToBeReady(fqdn);
 
-        // Docker push
-        DeploymentLogger.Log($"Pushing Docker image...");
-        var pushProcess = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = $"push {imageTag}",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-        pushProcess.Start();
-        
-        var pushErrorTask = pushProcess.StandardError.ReadToEndAsync();
-        await pushProcess.WaitForExitAsync();
-        
-        string pushError = await pushErrorTask;
-        
-        if (pushProcess.ExitCode != 0)
-        {
-            DeploymentLogger.LogError($"Docker push failed: {pushError}");
-            throw new Exception($"Docker push failed with exit code {pushProcess.ExitCode}: {pushError}");
-        }
-
-        DeploymentLogger.Log("Docker image pushed successfully");
+        return new AzureContainerApp(containerApp.Value.Data.Name, fqdn, resourceGroup.Resource.Data.Name, this);
     }
 
     private static async Task WaitForContainerAppToBeReady(string fqdn, int timeoutMinutes = 10, int intervalSeconds = 30)
