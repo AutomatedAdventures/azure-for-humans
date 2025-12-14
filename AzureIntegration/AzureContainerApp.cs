@@ -16,18 +16,16 @@ public class AzureContainerApp(string name, string fqdn, string resourceGroupNam
     {
         if (deleteResourceGroup)
         {
-            Console.WriteLine($"Disposing AzureContainerApp '{name}', deleting resource group '{resourceGroupName}'...");
-            Console.Out.Flush();
+            DeploymentLogger.Log($"Disposing Container App '{name}', deleting resource group...");
             try
             {
                 await azureCloud.DeleteResourceGroup(resourceGroupName);
-                Console.WriteLine($"Resource group '{resourceGroupName}' deleted successfully.");
+                DeploymentLogger.Log($"Resource group '{resourceGroupName}' deleted");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Warning: Failed to delete resource group '{resourceGroupName}': {ex.Message}");
+                DeploymentLogger.LogError($"Failed to delete resource group '{resourceGroupName}': {ex.Message}");
             }
-            Console.Out.Flush();
         }
     }
 }

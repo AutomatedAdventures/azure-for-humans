@@ -172,12 +172,10 @@ public class AzureCloud
         string name,
         Dictionary<string, string>? environmentVariables = null)
     {
-        Console.WriteLine($"Starting Container App deployment: {name}");
-        Console.Out.Flush();
+        DeploymentLogger.Start($"Starting Container App deployment: {name}");
 
         var projectDir = GetProjectDirectory(projectDirectory);
-        Console.WriteLine($"Found project directory: {projectDir.FullName}");
-        Console.Out.Flush();
+        DeploymentLogger.Log($"Found project directory: {projectDir.FullName}");
 
         // Validate Dockerfile exists
         var dockerfilePath = Path.Combine(projectDir.FullName, "Dockerfile");
@@ -185,19 +183,16 @@ public class AzureCloud
         {
             throw new FileNotFoundException($"Dockerfile not found in project directory: {projectDir.FullName}");
         }
-        Console.WriteLine($"Dockerfile found: {dockerfilePath}");
-        Console.Out.Flush();
+        DeploymentLogger.Log("Dockerfile found");
 
         var resourceGroup = await CreateResourceGroup(name);
-        Console.WriteLine($"Resource group '{resourceGroup.Name}' created successfully.");
-        Console.Out.Flush();
+        DeploymentLogger.Log($"Resource group '{resourceGroup.Name}' created");
 
         // Create Azure Container Registry
         string acrName = $"{name.ToLower().Replace("-", "")}acr";
         if (acrName.Length > 50) acrName = acrName[..50];
         
-        Console.WriteLine($"Creating Azure Container Registry '{acrName}'...");
-        Console.Out.Flush();
+        DeploymentLogger.Log($"Creating Azure Container Registry '{acrName}'...");
 
         var acrData = new ContainerRegistryData(_location, new ContainerRegistrySku(ContainerRegistrySkuName.Basic))
         {
@@ -206,38 +201,27 @@ public class AzureCloud
         var acr = await resourceGroup.Resource.GetContainerRegistries()
             .CreateOrUpdateAsync(WaitUntil.Completed, acrName, acrData);
         
-        Console.WriteLine($"Container Registry '{acr.Value.Data.Name}' created successfully.");
-        Console.WriteLine($"ACR Login Server: {acr.Value.Data.LoginServer}");
-        Console.Out.Flush();
+        DeploymentLogger.Log($"Container Registry created. Login Server: {acr.Value.Data.LoginServer}");
 
         // Get ACR credentials
-        Console.WriteLine("Retrieving ACR credentials...");
-        Console.Out.Flush();
         var credentials = await acr.Value.GetCredentialsAsync();
         string acrLoginServer = acr.Value.Data.LoginServer;
         string acrUsername = credentials.Value.Username;
         string acrPassword = credentials.Value.Passwords.First().Value;
-        Console.WriteLine($"ACR credentials retrieved. Username: {acrUsername}");
-        Console.Out.Flush();
+        DeploymentLogger.Log("ACR credentials retrieved");
 
         // Build and push Docker image
         string imageName = $"{acrLoginServer}/{name.ToLower()}:latest";
-        Console.WriteLine($"Building and pushing Docker image: {imageName}");
-        Console.Out.Flush();
         await BuildAndPushDockerImage(projectDir, acrLoginServer, acrUsername, acrPassword, name.ToLower());
-        Console.WriteLine("Docker image built and pushed successfully.");
-        Console.Out.Flush();
 
         // Create Container Apps Environment
         string environmentName = $"{name}-env";
-        Console.WriteLine($"Creating Container Apps Environment '{environmentName}'...");
-        Console.Out.Flush();
+        DeploymentLogger.Log($"Creating Container Apps Environment '{environmentName}'...");
         var environmentData = new ContainerAppManagedEnvironmentData(_location);
         var environment = await resourceGroup.Resource.GetContainerAppManagedEnvironments()
             .CreateOrUpdateAsync(WaitUntil.Completed, environmentName, environmentData);
 
-        Console.WriteLine($"Container Apps Environment '{environment.Value.Data.Name}' created successfully.");
-        Console.Out.Flush();
+        DeploymentLogger.Log("Container Apps Environment created");
 
         // Build environment variables for container
         var containerEnvVars = new List<ContainerAppEnvironmentVariable>
@@ -252,8 +236,6 @@ public class AzureCloud
                 containerEnvVars.Add(new ContainerAppEnvironmentVariable { Name = kvp.Key, Value = kvp.Value });
             }
         }
-        Console.WriteLine($"Configured {containerEnvVars.Count} environment variables.");
-        Console.Out.Flush();
 
         // Create container with environment variables
         var container = new ContainerAppContainer
@@ -272,8 +254,7 @@ public class AzureCloud
         }
 
         // Create Container App
-        Console.WriteLine($"Creating Container App '{name}'...");
-        Console.Out.Flush();
+        DeploymentLogger.Log($"Creating Container App '{name}'...");
         var containerAppData = new ContainerAppData(_location)
         {
             ManagedEnvironmentId = environment.Value.Id,
@@ -313,17 +294,13 @@ public class AzureCloud
         var containerApp = await resourceGroup.Resource.GetContainerApps()
             .CreateOrUpdateAsync(WaitUntil.Completed, name, containerAppData);
 
-        Console.WriteLine($"Container App '{containerApp.Value.Data.Name}' created successfully.");
-        Console.Out.Flush();
+        DeploymentLogger.Log("Container App created");
 
         // Wait for the Container App to be ready
         string fqdn = containerApp.Value.Data.Configuration.Ingress.Fqdn;
-        Console.WriteLine($"Container App FQDN: {fqdn}");
-        Console.Out.Flush();
         await WaitForContainerAppToBeReady(fqdn);
 
-        Console.WriteLine($"Container App deployment complete: https://{fqdn}");
-        Console.Out.Flush();
+        DeploymentLogger.Log($"Deployment complete: https://{fqdn}");
 
         return new AzureContainerApp(containerApp.Value.Data.Name, fqdn, resourceGroup.Resource.Data.Name, this);
     }
@@ -336,8 +313,7 @@ public class AzureCloud
         string imageName)
     {
         // Verify Docker is available
-        Console.WriteLine("Verifying Docker is available...");
-        Console.Out.Flush();
+        DeploymentLogger.Log("Verifying Docker availability...");
         var versionProcess = new Process
         {
             StartInfo = new ProcessStartInfo
@@ -358,12 +334,10 @@ public class AzureCloud
             string versionError = await versionProcess.StandardError.ReadToEndAsync();
             throw new Exception($"Docker is not available or not running: {versionError}");
         }
-        Console.WriteLine($"Docker is available. OS: {versionOutput.Trim()}");
-        Console.Out.Flush();
+        DeploymentLogger.Log($"Docker available (OS: {versionOutput.Trim()})");
 
         // Docker login
-        Console.WriteLine($"Logging into ACR {acrLoginServer}...");
-        Console.Out.Flush();
+        DeploymentLogger.Log($"Logging into ACR {acrLoginServer}...");
         var loginProcess = new Process
         {
             StartInfo = new ProcessStartInfo
@@ -377,21 +351,17 @@ public class AzureCloud
             }
         };
         loginProcess.Start();
-        string loginOutput = await loginProcess.StandardOutput.ReadToEndAsync();
         string loginError = await loginProcess.StandardError.ReadToEndAsync();
         await loginProcess.WaitForExitAsync();
         if (loginProcess.ExitCode != 0)
         {
             throw new Exception($"Docker login failed: {loginError}");
         }
-        Console.WriteLine($"Docker login successful: {loginOutput.Trim()}");
-        Console.Out.Flush();
+        DeploymentLogger.Log("Docker login successful");
 
         // Docker build
         string imageTag = $"{acrLoginServer}/{imageName}:latest";
-        Console.WriteLine($"Building Docker image {imageTag}...");
-        Console.WriteLine($"Working directory: {projectDir.FullName}");
-        Console.Out.Flush();
+        DeploymentLogger.Log($"Building Docker image {imageTag}...");
         
         var buildProcess = new Process
         {
@@ -408,31 +378,21 @@ public class AzureCloud
         };
         buildProcess.Start();
         
-        // Read output asynchronously to prevent blocking
         var buildOutputTask = buildProcess.StandardOutput.ReadToEndAsync();
         var buildErrorTask = buildProcess.StandardError.ReadToEndAsync();
         await buildProcess.WaitForExitAsync();
         
-        string buildOutput = await buildOutputTask;
         string buildError = await buildErrorTask;
-        
-        Console.WriteLine("Docker build output:");
-        Console.WriteLine(buildOutput);
-        Console.Out.Flush();
         
         if (buildProcess.ExitCode != 0)
         {
-            Console.WriteLine("Docker build error:");
-            Console.WriteLine(buildError);
-            Console.Out.Flush();
+            DeploymentLogger.LogError($"Docker build failed: {buildError}");
             throw new Exception($"Docker build failed with exit code {buildProcess.ExitCode}: {buildError}");
         }
-        Console.WriteLine("Docker build completed successfully.");
-        Console.Out.Flush();
+        DeploymentLogger.Log("Docker build completed");
 
         // Docker push
-        Console.WriteLine($"Pushing Docker image {imageTag}...");
-        Console.Out.Flush();
+        DeploymentLogger.Log($"Pushing Docker image...");
         var pushProcess = new Process
         {
             StartInfo = new ProcessStartInfo
@@ -447,28 +407,18 @@ public class AzureCloud
         };
         pushProcess.Start();
         
-        // Read output asynchronously
-        var pushOutputTask = pushProcess.StandardOutput.ReadToEndAsync();
         var pushErrorTask = pushProcess.StandardError.ReadToEndAsync();
         await pushProcess.WaitForExitAsync();
         
-        string pushOutput = await pushOutputTask;
         string pushError = await pushErrorTask;
-        
-        Console.WriteLine("Docker push output:");
-        Console.WriteLine(pushOutput);
-        Console.Out.Flush();
         
         if (pushProcess.ExitCode != 0)
         {
-            Console.WriteLine("Docker push error:");
-            Console.WriteLine(pushError);
-            Console.Out.Flush();
+            DeploymentLogger.LogError($"Docker push failed: {pushError}");
             throw new Exception($"Docker push failed with exit code {pushProcess.ExitCode}: {pushError}");
         }
 
-        Console.WriteLine($"Docker image {imageTag} pushed successfully.");
-        Console.Out.Flush();
+        DeploymentLogger.Log("Docker image pushed successfully");
     }
 
     private static async Task WaitForContainerAppToBeReady(string fqdn, int timeoutMinutes = 10, int intervalSeconds = 30)
@@ -478,8 +428,7 @@ public class AzureCloud
         var interval = TimeSpan.FromSeconds(intervalSeconds);
         var stopwatch = Stopwatch.StartNew();
 
-        Console.WriteLine($"Waiting for Container App to be ready at: {appUrl}");
-        Console.Out.Flush();
+        DeploymentLogger.Log($"Waiting for Container App at {appUrl}...");
 
         using var httpClient = new HttpClient();
         httpClient.Timeout = TimeSpan.FromSeconds(30);
@@ -488,30 +437,23 @@ public class AzureCloud
         {
             try
             {
-                Console.WriteLine($"Checking Container App health... (elapsed: {stopwatch.Elapsed:mm\\:ss})");
-                Console.Out.Flush();
                 var response = await httpClient.GetAsync(appUrl);
 
                 if (response.IsSuccessStatusCode)
                 {
-                    Console.WriteLine($"Container App is ready! Status: {response.StatusCode}");
-                    Console.Out.Flush();
+                    DeploymentLogger.Log($"Container App ready (Status: {response.StatusCode})");
                     return;
                 }
 
-                Console.WriteLine($"Container App not ready yet. Status: {response.StatusCode}");
-                Console.Out.Flush();
+                DeploymentLogger.Log($"Not ready yet (Status: {response.StatusCode})");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Container App not ready yet. Error: {ex.Message}");
-                Console.Out.Flush();
+                DeploymentLogger.Log($"Not ready yet ({ex.Message})");
             }
 
             if (stopwatch.Elapsed + interval < timeout)
             {
-                Console.WriteLine($"Waiting {intervalSeconds} seconds before next check...");
-                Console.Out.Flush();
                 await Task.Delay(interval);
             }
         }
