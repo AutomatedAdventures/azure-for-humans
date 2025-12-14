@@ -17,24 +17,14 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
-      - name: Debug - Check secrets
-        run: |
-          echo "CLIENT_ID length: ${#AZURE_CLIENT_ID_DEV}"
-          echo "CLIENT_SECRET length: ${#AZURE_CLIENT_SECRET_DEV}"
-          echo "TENANT_ID length: ${#AZURE_TENANT_ID_DEV}"
+      - name: Run tests
+        uses: devcontainers/ci@v0.3
         env:
           AZURE_CLIENT_ID_DEV: ${{ secrets.AZURE_CLIENT_ID_DEV }}
           AZURE_CLIENT_SECRET_DEV: ${{ secrets.AZURE_CLIENT_SECRET_DEV }}
           AZURE_TENANT_ID_DEV: ${{ secrets.AZURE_TENANT_ID_DEV }}
-
-      - name: Run tests
-        uses: devcontainers/ci@v0.3
         with:
           runCmd: dotnet test
-          env: |
-            AZURE_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_DEV }}
-            AZURE_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET_DEV }}
-            AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID_DEV }}
 
   publish-nuget:
     name: Build and Publish NuGet
