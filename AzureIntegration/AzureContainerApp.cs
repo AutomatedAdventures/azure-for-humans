@@ -1,8 +1,10 @@
 namespace AzureIntegration;
 
-public class AzureContainerApp(string name, string resourceGroupName, AzureCloud azureCloud) : IAsyncDisposable
+public class AzureContainerApp(string name, string fqdn, string resourceGroupName, AzureCloud azureCloud) : IAsyncDisposable
 {
     public string Name => name;
+    public string Fqdn => fqdn;
+    public string Url => $"https://{fqdn}";
 
     public async ValueTask DisposeAsync()
     {
@@ -14,7 +16,18 @@ public class AzureContainerApp(string name, string resourceGroupName, AzureCloud
     {
         if (deleteResourceGroup)
         {
-            await azureCloud.DeleteResourceGroup(resourceGroupName);
+            Console.WriteLine($"Disposing AzureContainerApp '{name}', deleting resource group '{resourceGroupName}'...");
+            Console.Out.Flush();
+            try
+            {
+                await azureCloud.DeleteResourceGroup(resourceGroupName);
+                Console.WriteLine($"Resource group '{resourceGroupName}' deleted successfully.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Warning: Failed to delete resource group '{resourceGroupName}': {ex.Message}");
+            }
+            Console.Out.Flush();
         }
     }
 }

@@ -17,7 +17,7 @@ public class ContainerAppTests
             name: containerAppName);
         
         using var client = new HttpClient();
-        client.BaseAddress = new Uri($"https://{containerAppName}.azurecontainerapps.io");
+        client.BaseAddress = new Uri(containerApp.Url);
         var response = await client.GetAsync("/");
         
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
@@ -43,7 +43,7 @@ public class ContainerAppTests
             environmentVariables: envVars);
         
         using var client = new HttpClient();
-        client.BaseAddress = new Uri($"https://{containerAppName}.azurecontainerapps.io");
+        client.BaseAddress = new Uri(containerApp.Url);
         foreach (var kvp in envVars)
         {
             var response = await client.GetAsync($"/variable/{kvp.Key}");
