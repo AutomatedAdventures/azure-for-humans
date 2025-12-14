@@ -1,18 +1,10 @@
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
-WORKDIR /app
-EXPOSE 8080
-
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-COPY ["TestContainerApp.csproj", "."]
-RUN dotnet restore "TestContainerApp.csproj"
 COPY . .
-RUN dotnet build "TestContainerApp.csproj" -c Release -o /app/build
+RUN dotnet publish -c Release -o /app
 
-FROM build AS publish
-RUN dotnet publish "TestContainerApp.csproj" -c Release -o /app/publish /p:UseAppHost=false
-
-FROM base AS final
+FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
-COPY --from=publish /app/publish .
+EXPOSE 8080
+COPY --from=build /app .
 ENTRYPOINT ["dotnet", "TestContainerApp.dll"]
