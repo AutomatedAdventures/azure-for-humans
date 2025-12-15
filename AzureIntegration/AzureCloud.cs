@@ -80,6 +80,12 @@ public class AzureCloud
         await resourceGroup.DeleteAsync(WaitUntil.Completed);
     }
 
+    public async Task<bool> ResourceGroupExists(string name)
+    {
+        var subscription = await GetSubscriptionAsync();
+        return await subscription.GetResourceGroups().ExistsAsync(name);
+    }
+
     public async Task<AzureFunction> DeployAzureFunction(
         string projectDirectory, string name, Dictionary<string, string>? environmentVariables = null)
     {
@@ -176,15 +182,25 @@ public class AzureCloud
 
         var projectDir = ValidateProjectDirectory(projectDirectory);
         var resourceGroup = await CreateResourceGroup(name);
-        var acr = await CreateContainerRegistry(resourceGroup, name);
         
-        string imageName = await BuildAndPushImage(projectDir, acr, name);
-        
-        var environment = await CreateContainerAppsEnvironment(resourceGroup, name);
-        var containerApp = await CreateContainerApp(resourceGroup, environment, acr, name, imageName, environmentVariables);
+        try
+        {
+            var acr = await CreateContainerRegistry(resourceGroup, name);
+            
+            string imageName = await BuildAndPushImage(projectDir, acr, name);
+            
+            var environment = await CreateContainerAppsEnvironment(resourceGroup, name);
+            var containerApp = await CreateContainerApp(resourceGroup, environment, acr, name, imageName, environmentVariables);
 
-        DeploymentLogger.Log($"Deployment complete: {containerApp.Url}");
-        return containerApp;
+            DeploymentLogger.Log($"Deployment complete: {containerApp.Url}");
+            return containerApp;
+        }
+        catch (Exception ex)
+        {
+            DeploymentLogger.LogError($"Deployment failed: {ex.Message}. Cleaning up resources...");
+            await DeleteResourceGroup(name);
+            throw;
+        }
     }
 
     private static DirectoryInfo ValidateProjectDirectory(string projectDirectory)
