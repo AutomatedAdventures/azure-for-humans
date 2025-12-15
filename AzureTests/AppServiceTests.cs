@@ -31,8 +31,7 @@ public class AppServiceTests
     public async Task DeployAppService()
     {
         var azure = new AzureCloud();
-        string uniqueId = Guid.NewGuid().ToString("N")[..8];
-        string appServiceName = $"TestAppService-{uniqueId}";
+        string appServiceName = GenerateAppServiceName();
         await using var app = await azure.DeployAppService(projectDirectory: "TestAppService", name: appServiceName);
         using var client = new HttpClient();
         client.BaseAddress = new Uri($"https://{appServiceName.ToLower()}.azurewebsites.net");
@@ -46,8 +45,7 @@ public class AppServiceTests
     public async Task DeployAppService_WithEnvironmentVariables()
     {
         var azure = new AzureCloud();
-        string uniqueId = Guid.NewGuid().ToString("N")[..8];
-        string appServiceName = $"TestAppService-{uniqueId}";
+        string appServiceName = GenerateAppServiceName();
         var envVars = new Dictionary<string, string>
                       {
                           { "MY_ENV_VAR1", "value1" },

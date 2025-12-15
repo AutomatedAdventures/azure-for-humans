@@ -31,8 +31,7 @@ public class AzureFunctionTests
     public async Task DeployAzureFunction()
     {
         var azure = new AzureCloud();
-        string uniqueId = Guid.NewGuid().ToString("N")[..8];
-        string functionName = $"AzureFunctionSample-{uniqueId}";
+        string functionName = GenerateFunctionName();
 
         await using var function = await azure.DeployAzureFunction(projectDirectory: "AzureFunctionSample", name: functionName);
         using var client = new HttpClient();
@@ -48,8 +47,7 @@ public class AzureFunctionTests
     public async Task DeployAzureFunction_WithEnvironmentVariables()
     {
         var azure = new AzureCloud();
-        string uniqueId = Guid.NewGuid().ToString("N")[..8];
-        string functionName = $"TestAzureFunction-{uniqueId}";
+        string functionName = GenerateFunctionName();
         var envVars = new Dictionary<string, string>
                       {
                           { "MY_ENV_VAR1", "value1" },
