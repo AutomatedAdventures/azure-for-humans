@@ -5,8 +5,12 @@ using Azure;
 using Azure.Core;
 using Azure.Identity;
 using Azure.ResourceManager;
+using Azure.ResourceManager.AppContainers;
+using Azure.ResourceManager.AppContainers.Models;
 using Azure.ResourceManager.AppService;
 using Azure.ResourceManager.AppService.Models;
+using Azure.ResourceManager.ContainerRegistry;
+using Azure.ResourceManager.ContainerRegistry.Models;
 using Azure.ResourceManager.Resources;
 using Microsoft.Build.Evaluation;
 using Microsoft.Build.Framework;
@@ -74,6 +78,12 @@ public class AzureCloud
         var subscription = await GetSubscriptionAsync();
         var resourceGroup = (await subscription.GetResourceGroups().GetAsync(name)).Value;
         await resourceGroup.DeleteAsync(WaitUntil.Completed);
+    }
+
+    public async Task<bool> ResourceGroupExists(string name)
+    {
+        var subscription = await GetSubscriptionAsync();
+        return await subscription.GetResourceGroups().ExistsAsync(name);
     }
 
     public async Task<AzureFunction> DeployAzureFunction(
@@ -161,6 +171,369 @@ public class AzureCloud
         await WaitForAppServiceToBeReady(webApp.Value.Data.DefaultHostName);
 
         return new AzureWebApp(webApp.Value, resourceGroup.Resource.Data.Name, this);
+    }
+
+    public async Task<AzureContainerApp> DeployContainerApp(
+        string projectDirectory,
+        string name,
+        Dictionary<string, string>? environmentVariables = null)
+    {
+        DeploymentLogger.Start($"Starting Container App deployment: {name}");
+
+        var projectDir = ValidateProjectDirectory(projectDirectory);
+        var resourceGroup = await CreateResourceGroup(name);
+        
+        try
+        {
+            var acr = await CreateContainerRegistry(resourceGroup, name);
+            
+            string imageName = await BuildAndPushImage(projectDir, acr, name);
+            
+            var environment = await CreateContainerAppsEnvironment(resourceGroup, name);
+            var containerApp = await CreateContainerApp(resourceGroup, environment, acr, name, imageName, environmentVariables);
+
+            DeploymentLogger.Log($"Deployment complete: {containerApp.Url}");
+            return containerApp;
+        }
+        catch (Exception ex)
+        {
+            DeploymentLogger.LogError($"Deployment failed: {ex.Message}. Cleaning up resources...");
+            await DeleteResourceGroup(name);
+            throw;
+        }
+    }
+
+    private static DirectoryInfo ValidateProjectDirectory(string projectDirectory)
+    {
+        var projectDir = GetProjectDirectory(projectDirectory);
+        DeploymentLogger.Log($"Project directory: {projectDir.FullName}");
+
+        var dockerfilePath = Path.Combine(projectDir.FullName, "Dockerfile");
+        if (!File.Exists(dockerfilePath))
+        {
+            throw new FileNotFoundException($"Dockerfile not found in: {projectDir.FullName}");
+        }
+        return projectDir;
+    }
+
+    private async Task<ContainerRegistryResource> CreateContainerRegistry(ResourceGroup resourceGroup, string name)
+    {
+        string acrName = SanitizeAcrName(name);
+        DeploymentLogger.Log($"Creating Container Registry '{acrName}'...");
+
+        var acrData = new ContainerRegistryData(_location, new ContainerRegistrySku(ContainerRegistrySkuName.Basic))
+        {
+            IsAdminUserEnabled = true
+        };
+        var acr = await resourceGroup.Resource.GetContainerRegistries()
+            .CreateOrUpdateAsync(WaitUntil.Completed, acrName, acrData);
+        
+        DeploymentLogger.Log($"Container Registry created: {acr.Value.Data.LoginServer}");
+        return acr.Value;
+    }
+
+    private static string SanitizeAcrName(string name)
+    {
+        string acrName = $"{name.ToLower().Replace("-", "")}acr";
+        return acrName.Length > 50 ? acrName[..50] : acrName;
+    }
+
+    private static async Task<string> BuildAndPushImage(DirectoryInfo projectDir, ContainerRegistryResource acr, string name)
+    {
+        var credentials = await acr.GetCredentialsAsync();
+        string loginServer = acr.Data.LoginServer;
+        string username = credentials.Value.Username;
+        string password = credentials.Value.Passwords.First().Value;
+
+        await BuildAndPushDockerImage(projectDir, loginServer, username, password, name.ToLower());
+        return $"{loginServer}/{name.ToLower()}:latest";
+    }
+
+    private static async Task BuildAndPushDockerImage(
+        DirectoryInfo projectDir,
+        string acrLoginServer,
+        string acrUsername,
+        string acrPassword,
+        string imageName)
+    {
+        await VerifyDockerAvailable();
+        await DockerLogin(acrLoginServer, acrUsername, acrPassword);
+        
+        string imageTag = $"{acrLoginServer}/{imageName}:latest";
+        await DockerBuild(projectDir, imageTag);
+        await DockerPush(imageTag);
+    }
+
+    private static async Task VerifyDockerAvailable()
+    {
+        DeploymentLogger.Log("Verifying Docker availability...");
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "docker",
+                Arguments = "version --format '{{.Server.Os}}'",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+        process.Start();
+        string output = await process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        
+        if (process.ExitCode != 0)
+        {
+            string error = await process.StandardError.ReadToEndAsync();
+            throw new Exception($"Docker is not available or not running: {error}");
+        }
+        DeploymentLogger.Log($"Docker available (OS: {output.Trim()})");
+    }
+
+    private static async Task DockerLogin(string server, string username, string password)
+    {
+        DeploymentLogger.Log($"Logging into ACR {server}...");
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "docker",
+                Arguments = $"login {server} -u {username} -p {password}",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+        process.Start();
+        string error = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        
+        if (process.ExitCode != 0)
+        {
+            throw new Exception($"Docker login failed: {error}");
+        }
+        DeploymentLogger.Log("Docker login successful");
+    }
+
+    private static async Task DockerBuild(DirectoryInfo projectDir, string imageTag)
+    {
+        DeploymentLogger.Log($"Building Docker image {imageTag}...");
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "docker",
+                Arguments = $"build --platform linux/amd64 -t {imageTag} .",
+                WorkingDirectory = projectDir.FullName,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+        process.Start();
+        
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        string error = await errorTask;
+        
+        if (process.ExitCode != 0)
+        {
+            DeploymentLogger.LogError($"Docker build failed: {error}");
+            throw new Exception($"Docker build failed with exit code {process.ExitCode}: {error}");
+        }
+        DeploymentLogger.Log("Docker build completed");
+    }
+
+    private static async Task DockerPush(string imageTag)
+    {
+        DeploymentLogger.Log("Pushing Docker image...");
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "docker",
+                Arguments = $"push {imageTag}",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+        process.Start();
+        
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        string error = await errorTask;
+        
+        if (process.ExitCode != 0)
+        {
+            DeploymentLogger.LogError($"Docker push failed: {error}");
+            throw new Exception($"Docker push failed with exit code {process.ExitCode}: {error}");
+        }
+        DeploymentLogger.Log("Docker image pushed successfully");
+    }
+
+    private static ContainerAppContainer BuildContainer(
+        string name, 
+        string imageName, 
+        Dictionary<string, string>? environmentVariables)
+    {
+        var container = new ContainerAppContainer
+        {
+            Name = name.ToLower(),
+            Image = imageName,
+            Resources = new AppContainerResources { Cpu = 0.5, Memory = "1Gi" }
+        };
+
+        container.Env.Add(new ContainerAppEnvironmentVariable 
+        { 
+            Name = "DEPLOYMENT_DATE", 
+            Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") 
+        });
+        container.Env.Add(new ContainerAppEnvironmentVariable 
+        { 
+            Name = "ASPNETCORE_URLS", 
+            Value = "http://+:8080" 
+        });
+
+        if (environmentVariables != null)
+        {
+            foreach (var kvp in environmentVariables)
+            {
+                container.Env.Add(new ContainerAppEnvironmentVariable { Name = kvp.Key, Value = kvp.Value });
+            }
+        }
+
+        return container;
+    }
+
+    private async Task<ContainerAppManagedEnvironmentResource> CreateContainerAppsEnvironment(ResourceGroup resourceGroup, string name)
+    {
+        string environmentName = $"{name}-env";
+        DeploymentLogger.Log($"Creating Container Apps Environment '{environmentName}'...");
+        
+        var environmentData = new ContainerAppManagedEnvironmentData(_location);
+        var environment = await resourceGroup.Resource.GetContainerAppManagedEnvironments()
+            .CreateOrUpdateAsync(WaitUntil.Completed, environmentName, environmentData);
+
+        DeploymentLogger.Log("Container Apps Environment created");
+        return environment.Value;
+    }
+
+    private async Task<AzureContainerApp> CreateContainerApp(
+        ResourceGroup resourceGroup,
+        ContainerAppManagedEnvironmentResource environment,
+        ContainerRegistryResource acr,
+        string name,
+        string imageName,
+        Dictionary<string, string>? environmentVariables)
+    {
+        DeploymentLogger.Log($"Creating Container App '{name}'...");
+
+        var credentials = await acr.GetCredentialsAsync();
+        var container = BuildContainer(name, imageName, environmentVariables);
+        
+        var containerAppData = new ContainerAppData(_location)
+        {
+            ManagedEnvironmentId = environment.Id,
+            Configuration = new ContainerAppConfiguration
+            {
+                Ingress = new ContainerAppIngressConfiguration
+                {
+                    External = true,
+                    TargetPort = 8080,
+                    Transport = ContainerAppIngressTransportMethod.Auto
+                },
+                Registries =
+                {
+                    new ContainerAppRegistryCredentials
+                    {
+                        Server = acr.Data.LoginServer,
+                        Username = credentials.Value.Username,
+                        PasswordSecretRef = "acr-password"
+                    }
+                },
+                Secrets =
+                {
+                    new ContainerAppWritableSecret 
+                    { 
+                        Name = "acr-password", 
+                        Value = credentials.Value.Passwords.First().Value 
+                    }
+                }
+            },
+            Template = new ContainerAppTemplate
+            {
+                Containers = { container },
+                Scale = new ContainerAppScale { MinReplicas = 1, MaxReplicas = 1 }
+            }
+        };
+
+        var containerApp = await resourceGroup.Resource.GetContainerApps()
+            .CreateOrUpdateAsync(WaitUntil.Completed, name, containerAppData);
+
+        string fqdn = containerApp.Value.Data.Configuration.Ingress.Fqdn;
+        DeploymentLogger.Log("Container App created, waiting for readiness...");
+        
+        await WaitForContainerAppToBeReady(fqdn);
+
+        return new AzureContainerApp(containerApp.Value.Data.Name, fqdn, resourceGroup.Resource.Data.Name, this);
+    }
+
+    private static async Task WaitForContainerAppToBeReady(string fqdn, int timeoutMinutes = 10, int intervalSeconds = 30)
+    {
+        string appUrl = $"https://{fqdn}";
+        var timeout = TimeSpan.FromMinutes(timeoutMinutes);
+        var interval = TimeSpan.FromSeconds(intervalSeconds);
+        var stopwatch = Stopwatch.StartNew();
+
+        DeploymentLogger.Log($"Waiting for Container App at {appUrl}...");
+
+        using var httpClient = new HttpClient();
+        httpClient.Timeout = TimeSpan.FromSeconds(30);
+
+        while (stopwatch.Elapsed < timeout)
+        {
+            try
+            {
+                var response = await httpClient.GetAsync(appUrl);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    DeploymentLogger.Log($"Container App ready (Status: {response.StatusCode})");
+                    return;
+                }
+
+                DeploymentLogger.Log($"Not ready yet (Status: {response.StatusCode})");
+            }
+            catch (Exception ex)
+            {
+                DeploymentLogger.Log($"Not ready yet ({ex.Message})");
+            }
+
+            if (stopwatch.Elapsed + interval < timeout)
+            {
+                await Task.Delay(interval);
+            }
+        }
+
+        throw new TimeoutException($"Container App at {appUrl} did not become ready within {timeoutMinutes} minutes");
+    }
+
+    private static DirectoryInfo GetProjectDirectory(string projectDirectory)
+    {
+        var currentDirectory = new DirectoryInfo(Directory.GetCurrentDirectory());
+        var projectDir = currentDirectory.Parent!.Parent!.Parent!.Parent!
+            .GetDirectories(projectDirectory, SearchOption.AllDirectories)
+            .FirstOrDefault();
+        if (projectDir == null)
+        {
+            throw new DirectoryNotFoundException($"Project directory not found: {projectDirectory}");
+        }
+        return projectDir;
     }
 
     private async Task DeployZipFile(string zipFilePath, string serviceName)
@@ -335,7 +708,7 @@ public class AzureCloud
 
             if (!buildResult)
             {
-                throw new InvalidOperationException($"Project publish failed for {projectFile.FullName}. Check build output above for details.");
+                throw new InvalidOperationException($"Project build failed for {projectFile.FullName}. Check build output above for details.");
             }
         }
 

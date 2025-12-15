@@ -19,12 +19,12 @@ jobs:
 
       - name: Run tests
         uses: devcontainers/ci@v0.3
-        with:
-          runCmd: dotnet test
         env:
           AZURE_CLIENT_ID_DEV: ${{ secrets.AZURE_CLIENT_ID_DEV }}
           AZURE_CLIENT_SECRET_DEV: ${{ secrets.AZURE_CLIENT_SECRET_DEV }}
           AZURE_TENANT_ID_DEV: ${{ secrets.AZURE_TENANT_ID_DEV }}
+        with:
+          runCmd: dotnet test
 
   publish-nuget:
     name: Build and Publish NuGet

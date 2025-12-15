@@ -5,7 +5,7 @@
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	"image": "mcr.microsoft.com/devcontainers/dotnet:1-8.0-bookworm",
 
-	"containerEnv": {
+	"remoteEnv": {
 		"AZURE_CLIENT_ID": "${localEnv:AZURE_CLIENT_ID_DEV}",
 		"AZURE_CLIENT_SECRET": "${localEnv:AZURE_CLIENT_SECRET_DEV}",
 		"AZURE_TENANT_ID": "${localEnv:AZURE_TENANT_ID_DEV}"
@@ -17,9 +17,11 @@
 				"github.vscode-github-actions"
 			]
 		}
-	}
+	},
 	// Features to add to the dev container. More info: https://containers.dev/features.
-	// "features": {},
+	"features": {
+		"ghcr.io/devcontainers/features/docker-in-docker:2": {}
+	}
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [5000, 5001],
