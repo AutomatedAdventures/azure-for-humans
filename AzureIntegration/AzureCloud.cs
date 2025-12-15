@@ -708,7 +708,7 @@ public class AzureCloud
 
             if (!buildResult)
             {
-                throw new InvalidOperationException($"Project publish failed for {projectFile.FullName}. Check build output above for details.");
+                throw new InvalidOperationException($"Project build failed for {projectFile.FullName}. Check build output above for details.");
             }
         }
 

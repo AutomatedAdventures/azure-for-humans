@@ -5,6 +5,28 @@ namespace AzureTests;
 
 public class AppServiceTests
 {
+    private static string GenerateAppServiceName() =>
+        $"testappservice-{Guid.NewGuid().ToString("N")[..8]}";
+
+    [Test]
+    public async Task DeployAppService_WhenDeploymentFails_CleansUpResources()
+    {
+        var azure = new AzureCloud();
+        string appServiceName = GenerateAppServiceName();
+
+        var exception = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await azure.DeployAppService(
+                projectDirectory: "TestAppServiceWithBuildError",
+                name: appServiceName));
+        
+        Assert.That(exception!.Message, Does.Contain("Project build failed"));
+        Assert.That(exception.Message, Does.Contain("TestAppServiceWithBuildError"));
+        
+        bool resourceGroupExists = await azure.ResourceGroupExists(appServiceName);
+        Assert.That(resourceGroupExists, Is.False, 
+            $"Resource group '{appServiceName}' should have been cleaned up after deployment failure");
+    }
+
     [Test]
     public async Task DeployAppService()
     {

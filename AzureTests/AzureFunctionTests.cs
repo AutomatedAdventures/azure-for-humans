@@ -5,6 +5,28 @@ namespace AzureTests;
 
 public class AzureFunctionTests
 {
+    private static string GenerateFunctionName() =>
+        $"testfunction-{Guid.NewGuid().ToString("N")[..8]}";
+
+    [Test]
+    public async Task DeployAzureFunction_WhenDeploymentFails_CleansUpResources()
+    {
+        var azure = new AzureCloud();
+        string functionName = GenerateFunctionName();
+
+        var exception = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await azure.DeployAzureFunction(
+                projectDirectory: "TestAzureFunctionWithBuildError",
+                name: functionName));
+        
+        Assert.That(exception!.Message, Does.Contain("Project build failed"));
+        Assert.That(exception.Message, Does.Contain("TestAzureFunctionWithBuildError"));
+        
+        bool resourceGroupExists = await azure.ResourceGroupExists(functionName);
+        Assert.That(resourceGroupExists, Is.False, 
+            $"Resource group '{functionName}' should have been cleaned up after deployment failure");
+    }
+
     [Test]
     public async Task DeployAzureFunction()
     {
