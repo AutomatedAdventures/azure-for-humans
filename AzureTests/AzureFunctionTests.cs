@@ -33,14 +33,12 @@ public class AzureFunctionTests
         var azure = new AzureCloud();
         string functionName = GenerateFunctionName();
 
-        await using var function = await azure.DeployAzureFunction(projectDirectory: "AzureFunctionSample", name: functionName);
-        using var client = new HttpClient();
-        client.BaseAddress = new Uri($"https://{functionName.ToLower()}.azurewebsites.net");
-        var response = await client.GetAsync("api/HttpTrigger");
+        await using var function = await azure.DeployAzureFunction(
+            projectDirectory: "AzureFunctionSample", 
+            name: functionName);
 
-        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
-        string content = await response.Content.ReadAsStringAsync();
-        Assert.That(content, Is.EqualTo("Azure Functions Sample test result"));
+        await AssertFunctionRespondsCorrectly(functionName);
+        await AssertLogsAppearInApplicationInsights(function);
     }
 
     [Test]
@@ -49,23 +47,91 @@ public class AzureFunctionTests
         var azure = new AzureCloud();
         string functionName = GenerateFunctionName();
         var envVars = new Dictionary<string, string>
-                      {
-                          { "MY_ENV_VAR1", "value1" },
-                          { "MY_ENV_VAR2", "value2" }
-                      };
-        await using var function =
-            await azure.DeployAzureFunction(
-                projectDirectory: "TestAzureFunction",
-                name: functionName,
-                environmentVariables: envVars);
+        {
+            { "MY_ENV_VAR1", "value1" },
+            { "MY_ENV_VAR2", "value2" }
+        };
+        
+        await using var function = await azure.DeployAzureFunction(
+            projectDirectory: "TestAzureFunction",
+            name: functionName,
+            environmentVariables: envVars);
+        
+        await AssertEnvironmentVariablesAreSet(functionName, envVars);
+    }
+
+    private static async Task AssertFunctionRespondsCorrectly(string functionName)
+    {
         using var client = new HttpClient();
         client.BaseAddress = new Uri($"https://{functionName.ToLower()}.azurewebsites.net");
-        foreach (var kvp in envVars)
+        
+        var response = await client.GetAsync("api/HttpTrigger");
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        
+        string content = await response.Content.ReadAsStringAsync();
+        Assert.That(content, Is.EqualTo("Azure Functions Sample test result"));
+    }
+
+    private static async Task AssertLogsAppearInApplicationInsights(AzureFunction function)
+    {
+        var expectedLog = "C# HTTP trigger function processed a request.";
+        var timeout = TimeSpan.FromMinutes(5);
+        
+        var logs = await WaitForLogToAppear(function, expectedLog, timeout);
+        
+        Assert.That(logs.FirstOrDefault(log => log == expectedLog), Is.Not.Null, 
+            $"Expected log not found in Application Insights within {timeout.TotalMinutes} minutes");
+    }
+
+    private static async Task<IEnumerable<string>> WaitForLogToAppear(
+        AzureFunction function, 
+        string expectedLog, 
+        TimeSpan timeout)
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var pollingInterval = TimeSpan.FromSeconds(10);
+        
+        Console.WriteLine($"Waiting for Application Insights logs to appear (timeout: {timeout.TotalMinutes} min)...");
+        
+        IEnumerable<string> logs = Array.Empty<string>();
+        
+        while (stopwatch.Elapsed < timeout)
         {
-            var response = await client.GetAsync($"api/variable/{kvp.Key}");
-            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK), $"Variable {kvp.Key} not found");
-            string value = await response.Content.ReadAsStringAsync();
-            Assert.That(value.Trim('"'), Is.EqualTo(kvp.Value), $"Variable {kvp.Key} value mismatch");
+            logs = function.GetLogsFromApplicationInsights();
+            
+            if (logs.Any(log => log.Contains(expectedLog)))
+            {
+                Console.WriteLine($"Application Insights logs found after {stopwatch.Elapsed.TotalSeconds:F1} seconds");
+                return logs;
+            }
+
+            if (stopwatch.Elapsed < timeout)
+            {
+                Console.WriteLine($"Logs not ready yet. Waiting {pollingInterval.TotalSeconds} more seconds... (elapsed: {stopwatch.Elapsed.TotalSeconds:F1}s)");
+                await Task.Delay(pollingInterval);
+            }
+        }
+        
+        return logs;
+    }
+
+    private static async Task AssertEnvironmentVariablesAreSet(
+        string functionName, 
+        Dictionary<string, string> expectedVariables)
+    {
+        using var client = new HttpClient();
+        client.BaseAddress = new Uri($"https://{functionName.ToLower()}.azurewebsites.net");
+        
+        foreach (var (name, expectedValue) in expectedVariables)
+        {
+            var response = await client.GetAsync($"api/variable/{name}");
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK), 
+                $"Variable {name} not found");
+            
+            string actualValue = await response.Content.ReadAsStringAsync();
+            Assert.That(actualValue.Trim('"'), Is.EqualTo(expectedValue), 
+                $"Variable {name} value mismatch");
         }
     }
 }

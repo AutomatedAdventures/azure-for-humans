@@ -93,8 +93,7 @@ public class AzureCloud
         var resourceGroup = await CreateResourceGroup(name);
         var storageAccount = await resourceGroup.CreateStorageAccount(name);
         var appServicePlan = await resourceGroup.CreateAppServicePlan(name);
-
-        //TODO: Create application insights
+        var applicationInsights = await resourceGroup.CreateApplicationInsights(name);
 
         var appSettings = new List<AppServiceNameValuePair>
                           {
@@ -106,7 +105,9 @@ public class AzureCloud
                               new() { Name = "SCM_DO_BUILD_DURING_DEPLOYMENT", Value = "0" },
                               new() { Name = "WEBSITE_USE_PLACEHOLDER_DOTNETISOLATED", Value = "1" },
                               new() { Name = "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING", Value = storageAccount.ConnectionString },
-                              new() { Name = "WEBSITE_CONTENTSHARE", Value = name.ToLower() }
+                              new() { Name = "WEBSITE_CONTENTSHARE", Value = name.ToLower() },
+                              new() { Name = "APPLICATIONINSIGHTS_CONNECTION_STRING", Value = applicationInsights.ConnectionString },
+                              new() { Name = "ApplicationInsightsAgent_EXTENSION_VERSION", Value = "~3" }
                           };
         appSettings = AddEnvironmentVariablesToAppSettings(appSettings, environmentVariables);
         var functionAppData = new WebSiteData(resourceGroup.Resource.Data.Location)
@@ -123,13 +124,11 @@ public class AzureCloud
         var functionApp = await resourceGroup.Resource.GetWebSites().CreateOrUpdateAsync(
                               WaitUntil.Completed, name, functionAppData);
 
-        //TODO: link application insights
-
         await DeployZipFile(zipFilePath, name);
 
         Console.WriteLine($"Function App '{functionApp.Value.Data.Name}' created successfully.");
 
-        return new AzureFunction(functionApp.Value, resourceGroup.Resource.Data.Name, this);
+        return new AzureFunction(functionApp.Value, applicationInsights.Resource, resourceGroup.Resource.Data.Name, this);
     }
 
     public async Task<AzureWebApp> DeployAppService(string projectDirectory, string name, Dictionary<string, string>? environmentVariables = null)

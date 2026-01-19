@@ -3,6 +3,7 @@ using Azure.ResourceManager.Storage;
 using Azure.ResourceManager.Storage.Models;
 using Azure.ResourceManager.AppService;
 using Azure.ResourceManager.AppService.Models;
+using Azure.ResourceManager.ApplicationInsights;
 using Azure;
 
 namespace AzureIntegration;
@@ -41,5 +42,18 @@ public record ResourceGroup(ResourceGroupResource Resource)
             WaitUntil.Completed, name, appServicePlanData);
 
         return new AppServicePlan(appServicePlan.Value);
+    }
+
+    public async Task<ApplicationInsightsComponent> CreateApplicationInsights(string name)
+    {
+        var appInsightsData = new ApplicationInsightsComponentData(Resource.Data.Location, "web")
+        {
+            Kind = "web"
+        };
+
+        var appInsights = await Resource.GetApplicationInsightsComponents().CreateOrUpdateAsync(
+            WaitUntil.Completed, name, appInsightsData);
+
+        return new ApplicationInsightsComponent(appInsights.Value);
     }
 }
