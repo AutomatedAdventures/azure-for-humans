@@ -44,6 +44,21 @@ public record ResourceGroup(ResourceGroupResource Resource)
         return new AppServicePlan(appServicePlan.Value);
     }
 
+    public async Task<AppServicePlan> CreateAppServicePlanForWebApp(string name)
+    {
+        var appServicePlanData = new AppServicePlanData(Resource.Data.Location)
+        {
+            Sku = new AppServiceSkuDescription { Name = "F1", Tier = "Free" },
+            Kind = "linux",
+            IsReserved = true // Use Linux
+        };
+
+        var appServicePlan = await Resource.GetAppServicePlans().CreateOrUpdateAsync(
+            WaitUntil.Completed, name, appServicePlanData);
+
+        return new AppServicePlan(appServicePlan.Value);
+    }
+
     public async Task<ApplicationInsightsComponent> CreateApplicationInsights(string name)
     {
         var appInsightsData = new ApplicationInsightsComponentData(Resource.Data.Location, "web")

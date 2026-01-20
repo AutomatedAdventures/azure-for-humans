@@ -24,8 +24,7 @@ public class AzureCloud
     private readonly TokenCredential _azureCredentials;
     private readonly ArmClient _armClient;
     private SubscriptionResource _subscription;
-    // Changed region from WestEurope to NorthEurope to avoid capacity issues
-    private readonly AzureLocation _location = AzureLocation.NorthEurope;
+    private readonly AzureLocation _location = AzureLocation.WestEurope;
 
     // Static lock and flag for MSBuild registration to ensure thread safety
     private static readonly object MsBuildLock = new();
@@ -135,16 +134,10 @@ public class AzureCloud
     {
         string zipFilePath = CreateDeploymentZipFile(projectDirectory, name);
         var resourceGroup = await CreateResourceGroup(name);
-        // Ensure App Service Plan name is unique per deployment
+        
+        // Create App Service Plan specifically for web apps using the dedicated method
         string appServicePlanName = $"{name.ToLower()}-plan-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
-        var appServicePlanData = new AppServicePlanData(resourceGroup.Resource.Data.Location)
-                                 {
-                                     Sku = new AppServiceSkuDescription { Name = "B1", Tier = "Basic" },
-                                     Kind = "app,linux",
-                                     IsReserved = true // Use Linux
-                                 };
-        var appServicePlan = await resourceGroup.Resource.GetAppServicePlans().CreateOrUpdateAsync(
-                                 WaitUntil.Completed, appServicePlanName, appServicePlanData);
+        var appServicePlan = await resourceGroup.CreateAppServicePlanForWebApp(appServicePlanName);
 
         var appSettings = new List<AppServiceNameValuePair>
                           {
@@ -153,7 +146,7 @@ public class AzureCloud
         appSettings = AddEnvironmentVariablesToAppSettings(appSettings, environmentVariables);
         var webAppData = new WebSiteData(resourceGroup.Resource.Data.Location)
                          {
-                             AppServicePlanId = appServicePlan.Value.Id,
+                             AppServicePlanId = appServicePlan.Id,
                              Kind = "app,linux",
                              SiteConfig = new SiteConfigProperties
                                           {

@@ -37,7 +37,7 @@ public class AzureFunctionTests
             projectDirectory: "AzureFunctionSample", 
             name: functionName);
 
-        await AssertFunctionRespondsCorrectly(functionName);
+        await AssertFunctionIsRunning(functionName);
         await AssertLogsAppearInApplicationInsights(function);
     }
 
@@ -60,7 +60,7 @@ public class AzureFunctionTests
         await AssertEnvironmentVariablesAreSet(functionName, envVars);
     }
 
-    private static async Task AssertFunctionRespondsCorrectly(string functionName)
+    private static async Task AssertFunctionIsRunning(string functionName)
     {
         using var client = new HttpClient();
         client.BaseAddress = new Uri($"https://{functionName.ToLower()}.azurewebsites.net");
