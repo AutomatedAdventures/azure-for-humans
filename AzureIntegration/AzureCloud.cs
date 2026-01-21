@@ -90,44 +90,53 @@ public class AzureCloud
     {
         string zipFilePath = CreateDeploymentZipFile(projectDirectory, name);
         var resourceGroup = await CreateResourceGroup(name);
-        var storageAccount = await resourceGroup.CreateStorageAccount(name);
-        var appServicePlan = await resourceGroup.CreateAppServicePlan(name);
-        var applicationInsights = await resourceGroup.CreateApplicationInsights(name);
+        
+        try
+        {
+            var storageAccount = await resourceGroup.CreateStorageAccount(name);
+            var appServicePlan = await resourceGroup.CreateAppServicePlan(name);
+            var applicationInsights = await resourceGroup.CreateApplicationInsights(name);
 
-        var appSettings = new List<AppServiceNameValuePair>
-                          {
-                              new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") },
-                              new() { Name = "AzureWebJobsStorage", Value = storageAccount.ConnectionString },
-                              new() { Name = "WEBSITE_RUN_FROM_PACKAGE", Value = "1" },
-                              new() { Name = "FUNCTIONS_EXTENSION_VERSION", Value = "~4" },
-                              new() { Name = "FUNCTIONS_WORKER_RUNTIME", Value = "dotnet-isolated" },
-                              new() { Name = "SCM_DO_BUILD_DURING_DEPLOYMENT", Value = "0" },
-                              new() { Name = "WEBSITE_USE_PLACEHOLDER_DOTNETISOLATED", Value = "1" },
-                              new() { Name = "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING", Value = storageAccount.ConnectionString },
-                              new() { Name = "WEBSITE_CONTENTSHARE", Value = name.ToLower() },
-                              new() { Name = "APPLICATIONINSIGHTS_CONNECTION_STRING", Value = applicationInsights.ConnectionString },
-                              new() { Name = "ApplicationInsightsAgent_EXTENSION_VERSION", Value = "~3" }
-                          };
-        appSettings = AddEnvironmentVariablesToAppSettings(appSettings, environmentVariables);
-        var functionAppData = new WebSiteData(resourceGroup.Resource.Data.Location)
+            var appSettings = new List<AppServiceNameValuePair>
                               {
-                                  AppServicePlanId = appServicePlan.Id,
-                                  Kind = "functionapp,linux",
-                                  SiteConfig = new SiteConfigProperties
-                                               {
-                                                   AppSettings = appSettings,
-                                                   LinuxFxVersion = "DOTNET-ISOLATED|8.0",
-                                               }
+                                  new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") },
+                                  new() { Name = "AzureWebJobsStorage", Value = storageAccount.ConnectionString },
+                                  new() { Name = "WEBSITE_RUN_FROM_PACKAGE", Value = "1" },
+                                  new() { Name = "FUNCTIONS_EXTENSION_VERSION", Value = "~4" },
+                                  new() { Name = "FUNCTIONS_WORKER_RUNTIME", Value = "dotnet-isolated" },
+                                  new() { Name = "SCM_DO_BUILD_DURING_DEPLOYMENT", Value = "0" },
+                                  new() { Name = "WEBSITE_USE_PLACEHOLDER_DOTNETISOLATED", Value = "1" },
+                                  new() { Name = "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING", Value = storageAccount.ConnectionString },
+                                  new() { Name = "WEBSITE_CONTENTSHARE", Value = name.ToLower() },
+                                  new() { Name = "APPLICATIONINSIGHTS_CONNECTION_STRING", Value = applicationInsights.ConnectionString },
+                                  new() { Name = "ApplicationInsightsAgent_EXTENSION_VERSION", Value = "~3" }
                               };
+            appSettings = AddEnvironmentVariablesToAppSettings(appSettings, environmentVariables);
+            var functionAppData = new WebSiteData(resourceGroup.Resource.Data.Location)
+                                  {
+                                      AppServicePlanId = appServicePlan.Id,
+                                      Kind = "functionapp,linux",
+                                      SiteConfig = new SiteConfigProperties
+                                                   {
+                                                       AppSettings = appSettings,
+                                                       LinuxFxVersion = "DOTNET-ISOLATED|8.0",
+                                                   }
+                                  };
 
-        var functionApp = await resourceGroup.Resource.GetWebSites().CreateOrUpdateAsync(
-                              WaitUntil.Completed, name, functionAppData);
+            var functionApp = await resourceGroup.Resource.GetWebSites().CreateOrUpdateAsync(
+                                  WaitUntil.Completed, name, functionAppData);
 
-        await DeployZipFile(zipFilePath, name);
+            await DeployZipFile(zipFilePath, name);
 
-        Console.WriteLine($"Function App '{functionApp.Value.Data.Name}' created successfully.");
+            Console.WriteLine($"Function App '{functionApp.Value.Data.Name}' created successfully.");
 
-        return new AzureFunction(functionApp.Value, applicationInsights.Resource, resourceGroup.Resource.Data.Name, this);
+            return new AzureFunction(functionApp.Value, applicationInsights.Resource, resourceGroup.Resource.Data.Name, this);
+        }
+        catch (Exception)
+        {
+            await DeleteResourceGroup(name);
+            throw;
+        }
     }
 
     public async Task<AzureWebApp> DeployAppService(string projectDirectory, string name, Dictionary<string, string>? environmentVariables = null)
@@ -135,34 +144,42 @@ public class AzureCloud
         string zipFilePath = CreateDeploymentZipFile(projectDirectory, name);
         var resourceGroup = await CreateResourceGroup(name);
         
-        // Create App Service Plan specifically for web apps using the dedicated method
-        string appServicePlanName = $"{name.ToLower()}-plan-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
-        var appServicePlan = await resourceGroup.CreateAppServicePlanForWebApp(appServicePlanName);
+        try
+        {
+            // Create App Service Plan specifically for web apps using the dedicated method
+            string appServicePlanName = $"{name.ToLower()}-plan-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
+            var appServicePlan = await resourceGroup.CreateAppServicePlanForWebApp(appServicePlanName);
 
-        var appSettings = new List<AppServiceNameValuePair>
-                          {
-                              new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") }
-                          };
-        appSettings = AddEnvironmentVariablesToAppSettings(appSettings, environmentVariables);
-        var webAppData = new WebSiteData(resourceGroup.Resource.Data.Location)
-                         {
-                             AppServicePlanId = appServicePlan.Id,
-                             Kind = "app,linux",
-                             SiteConfig = new SiteConfigProperties
-                                          {
-                                              AppSettings = appSettings,
-                                              LinuxFxVersion = "DOTNETCORE|8.0"
-                                          }
-                         };
-        var webApp = await resourceGroup.Resource.GetWebSites().CreateOrUpdateAsync(
-                         WaitUntil.Completed, name, webAppData);
+            var appSettings = new List<AppServiceNameValuePair>
+                              {
+                                  new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") }
+                              };
+            appSettings = AddEnvironmentVariablesToAppSettings(appSettings, environmentVariables);
+            var webAppData = new WebSiteData(resourceGroup.Resource.Data.Location)
+                             {
+                                 AppServicePlanId = appServicePlan.Id,
+                                 Kind = "app,linux",
+                                 SiteConfig = new SiteConfigProperties
+                                              {
+                                                  AppSettings = appSettings,
+                                                  LinuxFxVersion = "DOTNETCORE|8.0"
+                                              }
+                             };
+            var webApp = await resourceGroup.Resource.GetWebSites().CreateOrUpdateAsync(
+                             WaitUntil.Completed, name, webAppData);
 
-        await DeployZipFile(zipFilePath, name);
+            await DeployZipFile(zipFilePath, name);
 
-        // Wait for the App Service to be ready to receive HTTP requests
-        await WaitForAppServiceToBeReady(webApp.Value.Data.DefaultHostName);
+            // Wait for the App Service to be ready to receive HTTP requests
+            await WaitForAppServiceToBeReady(webApp.Value.Data.DefaultHostName);
 
-        return new AzureWebApp(webApp.Value, resourceGroup.Resource.Data.Name, this);
+            return new AzureWebApp(webApp.Value, resourceGroup.Resource.Data.Name, this);
+        }
+        catch (Exception)
+        {
+            await DeleteResourceGroup(name);
+            throw;
+        }
     }
 
     public async Task<AzureContainerApp> DeployContainerApp(
