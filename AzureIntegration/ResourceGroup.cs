@@ -4,21 +4,22 @@ using Azure.ResourceManager.Storage.Models;
 using Azure.ResourceManager.AppService;
 using Azure.ResourceManager.AppService.Models;
 using Azure.ResourceManager.ApplicationInsights;
+using Azure.ResourceManager.OperationalInsights;
+using Azure.Monitor.Query;
 using Azure;
 
 namespace AzureIntegration;
 
-public record ResourceGroup(ResourceGroupResource Resource)
+public record ResourceGroup(ResourceGroupResource Resource, AzureCloud AzureCloud)
 {
+    private const int MaxStorageAccountNameLength = 24;
+    
     public string Name => Resource.Data.Name;
 
     public async Task<StorageAccount> CreateStorageAccount(string name)
     {
-        string storageAccountName = $"{name.ToLower().Replace("-", "")}storage";
-        if (storageAccountName.Length > 24)
-        {
-            storageAccountName = storageAccountName.Substring(0, 24);
-        }
+        string storageAccountName = SanitizeStorageAccountName(name);
+        
         var storageSku = new StorageSku(StorageSkuName.StandardLrs);
         var storageKind = StorageKind.StorageV2;
         var storageParameters = new StorageAccountCreateOrUpdateContent(storageSku, storageKind, location: Resource.Data.Location);
@@ -29,7 +30,7 @@ public record ResourceGroup(ResourceGroupResource Resource)
         return new StorageAccount(storageAccount.Value);
     }
 
-    public async Task<AppServicePlan> CreateAppServicePlan(string name)
+    public async Task<AppServicePlan> CreateAppServicePlanForFunctionApp(string name)
     {
         var appServicePlanData = new AppServicePlanData(Resource.Data.Location)
         {
@@ -59,7 +60,7 @@ public record ResourceGroup(ResourceGroupResource Resource)
         return new AppServicePlan(appServicePlan.Value);
     }
 
-    public async Task<ApplicationInsightsComponent> CreateApplicationInsights(string name)
+    public async Task<ApplicationInsights> CreateApplicationInsights(string name)
     {
         var appInsightsData = new ApplicationInsightsComponentData(Resource.Data.Location, "web")
         {
@@ -69,6 +70,28 @@ public record ResourceGroup(ResourceGroupResource Resource)
         var appInsights = await Resource.GetApplicationInsightsComponents().CreateOrUpdateAsync(
             WaitUntil.Completed, name, appInsightsData);
 
-        return new ApplicationInsightsComponent(appInsights.Value);
+        var armClient = AzureCloud.GetArmClient();
+        var credential = AzureCloud.GetCredential();
+        
+        var workspaceResource = armClient.GetOperationalInsightsWorkspaceResource(appInsights.Value.Data.WorkspaceResourceId!);
+        var workspace = await workspaceResource.GetAsync();
+        
+        var workspaceId = workspace.Value.Data.CustomerId.ToString();
+        var logsQueryClient = new LogsQueryClient(credential);
+        var connectionString = appInsights.Value.Data.ConnectionString ?? string.Empty;
+
+        return new ApplicationInsights(workspaceId!, logsQueryClient, connectionString);
+    }
+
+    private static string SanitizeStorageAccountName(string name)
+    {
+        string storageAccountName = $"{name.ToLower().Replace("-", "")}storage";
+        
+        if (storageAccountName.Length > MaxStorageAccountNameLength)
+        {
+            storageAccountName = storageAccountName[..MaxStorageAccountNameLength];
+        }
+        
+        return storageAccountName;
     }
 }

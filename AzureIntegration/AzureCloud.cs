@@ -69,7 +69,7 @@ public class AzureCloud
         var subscription = await GetSubscriptionAsync();
         var resourceGroupData = new ResourceGroupData(_location);
         var operationResult = await subscription.GetResourceGroups().CreateOrUpdateAsync(WaitUntil.Completed, name, resourceGroupData);
-        return new ResourceGroup(operationResult.Value);
+        return new ResourceGroup(operationResult.Value, this);
     }
 
     public async Task DeleteResourceGroup(string name)
@@ -94,7 +94,7 @@ public class AzureCloud
         try
         {
             var storageAccount = await resourceGroup.CreateStorageAccount(name);
-            var appServicePlan = await resourceGroup.CreateAppServicePlan(name);
+            var appServicePlan = await resourceGroup.CreateAppServicePlanForFunctionApp(name);
             var applicationInsights = await resourceGroup.CreateApplicationInsights(name);
 
             var appSettings = new List<AppServiceNameValuePair>
@@ -130,7 +130,7 @@ public class AzureCloud
 
             Console.WriteLine($"Function App '{functionApp.Value.Data.Name}' created successfully.");
 
-            return new AzureFunction(functionApp.Value, applicationInsights.Resource, resourceGroup.Resource.Data.Name, this);
+            return new AzureFunction(functionApp.Value, applicationInsights, resourceGroup.Resource.Data.Name, this);
         }
         catch (Exception)
         {
@@ -743,9 +743,19 @@ public class AzureCloud
         var resourceGroups = new List<ResourceGroup>();
         await foreach (var resourceGroup in subscription.GetResourceGroups().GetAllAsync())
         {
-            resourceGroups.Add(new ResourceGroup(resourceGroup));
+            resourceGroups.Add(new ResourceGroup(resourceGroup, this));
         }
 
         return resourceGroups;
+    }
+
+    public ArmClient GetArmClient()
+    {
+        return _armClient;
+    }
+
+    public TokenCredential GetCredential()
+    {
+        return _azureCredentials;
     }
 }
