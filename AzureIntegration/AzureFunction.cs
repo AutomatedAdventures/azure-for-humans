@@ -2,7 +2,11 @@ using Azure.ResourceManager.AppService;
 
 namespace AzureIntegration;
 
-public class AzureFunction(WebSiteResource functionApp, string resourceGroupName, AzureCloud azureCloud)
+public class AzureFunction(
+    WebSiteResource functionApp, 
+    ApplicationInsights applicationInsights, 
+    string resourceGroupName, 
+    AzureCloud azureCloud)
     : IAsyncDisposable
 {
     public string Name => functionApp.Data.Name;
@@ -12,6 +16,11 @@ public class AzureFunction(WebSiteResource functionApp, string resourceGroupName
     {
         await DisposeAsync(true);
         GC.SuppressFinalize(this);
+    }
+
+    public IEnumerable<string> GetLogsFromApplicationInsights()
+    {
+        return applicationInsights.GetLogs();
     }
 
     private async ValueTask DisposeAsync(bool deleteResourceGroup)
