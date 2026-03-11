@@ -25,6 +25,25 @@ public class ContainerAppTests
     }
 
     [Test]
+    public async Task DeployContainerApp_WithProjectDependencies()
+    {
+        var azure = new AzureCloud();
+        string containerAppName = GenerateContainerAppName();
+
+        await using var containerApp = await azure.DeployContainerApp(
+            projectDirectory: "App",
+            name: containerAppName,
+            workspaceRoot: "TestContainerAppWithProjectDependencies");
+
+        await AssertResourceGroupExists(azure, containerAppName);
+        using var client = new HttpClient { BaseAddress = new Uri(containerApp.Url) };
+        var response = await client.GetAsync("/");
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        string content = await response.Content.ReadAsStringAsync();
+        Assert.That(content, Is.EqualTo("TestContainerAppWithProjectDependencies deployment successful!"));
+    }
+
+    [Test]
     public async Task DeployContainerApp()
     {
         var azure = new AzureCloud();

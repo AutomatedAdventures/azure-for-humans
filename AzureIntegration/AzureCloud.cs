@@ -185,19 +185,21 @@ public class AzureCloud
     public async Task<AzureContainerApp> DeployContainerApp(
         string projectDirectory,
         string name,
-        Dictionary<string, string>? environmentVariables = null)
+        Dictionary<string, string>? environmentVariables = null,
+        string? workspaceRoot = null)
     {
         DeploymentLogger.Start($"Starting Container App deployment: {name}");
-
-        var projectDir = ValidateProjectDirectory(projectDirectory);
-        var resourceGroup = await CreateResourceGroup(name);
         
+        (var buildContext, var projectDir) = GetBuildContextPaths(projectDirectory, workspaceRoot);
+
+        var resourceGroup = await CreateResourceGroup(name);
+
         try
         {
             var acr = await CreateContainerRegistry(resourceGroup, name);
-            
-            string imageName = await BuildAndPushImage(projectDir, acr, name);
-            
+
+            string imageName = await BuildAndPushImage(projectDir, buildContext, acr, name);
+
             var environment = await CreateContainerAppsEnvironment(resourceGroup, name);
             var containerApp = await CreateContainerApp(resourceGroup, environment, acr, name, imageName, environmentVariables);
 
@@ -212,17 +214,32 @@ public class AzureCloud
         }
     }
 
-    private static DirectoryInfo ValidateProjectDirectory(string projectDirectory)
+    private static (DirectoryInfo buildContext, DirectoryInfo projectDir) GetBuildContextPaths(string projectDirectory, string? workspaceRoot)
     {
-        var projectDir = GetProjectDirectory(projectDirectory);
-        DeploymentLogger.Log($"Project directory: {projectDir.FullName}");
-
-        var dockerfilePath = Path.Combine(projectDir.FullName, "Dockerfile");
-        if (!File.Exists(dockerfilePath))
+        DirectoryInfo buildContext, projectDir;
+        if (workspaceRoot is null)
         {
-            throw new FileNotFoundException($"Dockerfile not found in: {projectDir.FullName}");
+            projectDir = ValidateProjectDirectory(GetProjectDirectory(projectDirectory));
+            buildContext = projectDir;
         }
-        return projectDir;
+        else
+        {
+            buildContext = GetProjectDirectory(workspaceRoot);
+            projectDir = ValidateProjectDirectory(new DirectoryInfo(Path.Combine(buildContext.FullName, projectDirectory)));
+        }
+
+        return (buildContext, projectDir);
+    }
+
+    private static DirectoryInfo ValidateProjectDirectory(DirectoryInfo projectDirectory)
+    {
+        DeploymentLogger.Log($"Project directory: {projectDirectory.FullName}");
+
+        if (!File.Exists(Path.Combine(projectDirectory.FullName, "Dockerfile")))
+        {
+            throw new FileNotFoundException($"Dockerfile not found in: {projectDirectory.FullName}");
+        }
+        return projectDirectory;
     }
 
     private async Task<ContainerRegistryResource> CreateContainerRegistry(ResourceGroup resourceGroup, string name)
@@ -247,19 +264,20 @@ public class AzureCloud
         return acrName.Length > 50 ? acrName[..50] : acrName;
     }
 
-    private static async Task<string> BuildAndPushImage(DirectoryInfo projectDir, ContainerRegistryResource acr, string name)
+    private static async Task<string> BuildAndPushImage(DirectoryInfo projectDir, DirectoryInfo buildContext, ContainerRegistryResource acr, string name)
     {
         var credentials = await acr.GetCredentialsAsync();
         string loginServer = acr.Data.LoginServer;
         string username = credentials.Value.Username;
         string password = credentials.Value.Passwords.First().Value;
 
-        await BuildAndPushDockerImage(projectDir, loginServer, username, password, name.ToLower());
+        await BuildAndPushDockerImage(projectDir, buildContext, loginServer, username, password, name.ToLower());
         return $"{loginServer}/{name.ToLower()}:latest";
     }
 
     private static async Task BuildAndPushDockerImage(
         DirectoryInfo projectDir,
+        DirectoryInfo buildContext,
         string acrLoginServer,
         string acrUsername,
         string acrPassword,
@@ -267,9 +285,11 @@ public class AzureCloud
     {
         await VerifyDockerAvailable();
         await DockerLogin(acrLoginServer, acrUsername, acrPassword);
-        
+
         string imageTag = $"{acrLoginServer}/{imageName}:latest";
-        await DockerBuild(projectDir, imageTag);
+        string dockerfilePath = Path.GetRelativePath(buildContext.FullName, Path.Combine(projectDir.FullName, "Dockerfile"))
+            .Replace('\\', '/');
+        await DockerBuild(buildContext, imageTag, dockerfilePath);
         await DockerPush(imageTag);
     }
 
@@ -326,7 +346,7 @@ public class AzureCloud
         DeploymentLogger.Log("Docker login successful");
     }
 
-    private static async Task DockerBuild(DirectoryInfo projectDir, string imageTag)
+    private static async Task DockerBuild(DirectoryInfo buildContext, string imageTag, string dockerfilePath)
     {
         DeploymentLogger.Log($"Building Docker image {imageTag}...");
         var process = new Process
@@ -334,8 +354,8 @@ public class AzureCloud
             StartInfo = new ProcessStartInfo
             {
                 FileName = "docker",
-                Arguments = $"build --platform linux/amd64 -t {imageTag} .",
-                WorkingDirectory = projectDir.FullName,
+                Arguments = $"build --platform linux/amd64 -t {imageTag} -f {dockerfilePath} .",
+                WorkingDirectory = buildContext.FullName,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
