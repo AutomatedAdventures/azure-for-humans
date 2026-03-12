@@ -24,7 +24,7 @@ public class AzureCloud
     private readonly TokenCredential _azureCredentials;
     private readonly ArmClient _armClient;
     private SubscriptionResource _subscription;
-    private readonly AzureLocation _location = AzureLocation.WestEurope;
+    public AzureLocation Location { get; }
 
     // Static lock and flag for MSBuild registration to ensure thread safety
     private static readonly object MsBuildLock = new();
@@ -33,15 +33,16 @@ public class AzureCloud
     // Static lock for MSBuild operations to prevent concurrent builds
     private static readonly object MsBuildOperationLock = new();
 
-    public AzureCloud() : this(new DefaultAzureCredential())
+    public AzureCloud(AzureLocation? location = null) : this(new DefaultAzureCredential(), location)
     {
     }
 
-    public AzureCloud(TokenCredential credentials)
+    public AzureCloud(TokenCredential credentials, AzureLocation? location = null)
     {
         _azureCredentials = credentials;
         _armClient = new ArmClient(_azureCredentials);
         _subscription = null!;
+        Location = location ?? AzureLocation.WestEurope;
     }
 
     private async Task<SubscriptionResource> GetSubscriptionAsync()
@@ -67,7 +68,7 @@ public class AzureCloud
     public async Task<ResourceGroup> CreateResourceGroup(string name)
     {
         var subscription = await GetSubscriptionAsync();
-        var resourceGroupData = new ResourceGroupData(_location);
+        var resourceGroupData = new ResourceGroupData(Location);
         var operationResult = await subscription.GetResourceGroups().CreateOrUpdateAsync(WaitUntil.Completed, name, resourceGroupData);
         return new ResourceGroup(operationResult.Value, this);
     }
@@ -247,7 +248,7 @@ public class AzureCloud
         string acrName = SanitizeAcrName(name);
         DeploymentLogger.Log($"Creating Container Registry '{acrName}'...");
 
-        var acrData = new ContainerRegistryData(_location, new ContainerRegistrySku(ContainerRegistrySkuName.Basic))
+        var acrData = new ContainerRegistryData(Location, new ContainerRegistrySku(ContainerRegistrySkuName.Basic))
         {
             IsAdminUserEnabled = true
         };
@@ -444,7 +445,7 @@ public class AzureCloud
         string environmentName = $"{name}-env";
         DeploymentLogger.Log($"Creating Container Apps Environment '{environmentName}'...");
         
-        var environmentData = new ContainerAppManagedEnvironmentData(_location);
+        var environmentData = new ContainerAppManagedEnvironmentData(Location);
         var environment = await resourceGroup.Resource.GetContainerAppManagedEnvironments()
             .CreateOrUpdateAsync(WaitUntil.Completed, environmentName, environmentData);
 
@@ -465,7 +466,7 @@ public class AzureCloud
         var credentials = await acr.GetCredentialsAsync();
         var container = BuildContainer(name, imageName, environmentVariables);
         
-        var containerAppData = new ContainerAppData(_location)
+        var containerAppData = new ContainerAppData(Location)
         {
             ManagedEnvironmentId = environment.Id,
             Configuration = new ContainerAppConfiguration

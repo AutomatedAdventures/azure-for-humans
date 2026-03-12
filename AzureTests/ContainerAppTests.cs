@@ -1,4 +1,5 @@
 using System.Net;
+using Azure.Core;
 using AzureIntegration;
 
 namespace AzureTests;
@@ -27,7 +28,7 @@ public class ContainerAppTests
     [Test]
     public async Task DeployContainerApp_WithProjectDependencies()
     {
-        var azure = new AzureCloud();
+        var azure = new AzureCloud(location: AzureLocation.EastUS);
         string containerAppName = GenerateContainerAppName();
 
         await using var containerApp = await azure.DeployContainerApp(
@@ -46,7 +47,7 @@ public class ContainerAppTests
     [Test]
     public async Task DeployContainerApp()
     {
-        var azure = new AzureCloud();
+        var azure = new AzureCloud(location: AzureLocation.EastUS);
         string containerAppName = GenerateContainerAppName();
         var envVars = new Dictionary<string, string>
                       {
