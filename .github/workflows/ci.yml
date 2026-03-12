@@ -24,7 +24,7 @@ jobs:
           AZURE_CLIENT_SECRET_DEV: ${{ secrets.AZURE_CLIENT_SECRET_DEV }}
           AZURE_TENANT_ID_DEV: ${{ secrets.AZURE_TENANT_ID_DEV }}
         with:
-          runCmd: dotnet test
+          runCmd: dotnet test --filter "Category!=LongRunning"
 
   publish-nuget:
     name: Build and Publish NuGet

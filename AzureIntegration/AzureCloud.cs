@@ -190,8 +190,8 @@ public class AzureCloud
         string? workspaceRoot = null)
     {
         DeploymentLogger.Start($"Starting Container App deployment: {name}");
-        
-        (var buildContext, var projectDir) = GetBuildContextPaths(projectDirectory, workspaceRoot);
+
+        (var buildContext, var projectDir) = ProjectPathResolver.GetBuildContextPaths(projectDirectory, workspaceRoot);
 
         var resourceGroup = await CreateResourceGroup(name);
 
@@ -215,33 +215,6 @@ public class AzureCloud
         }
     }
 
-    private static (DirectoryInfo buildContext, DirectoryInfo projectDir) GetBuildContextPaths(string projectDirectory, string? workspaceRoot)
-    {
-        DirectoryInfo buildContext, projectDir;
-        if (workspaceRoot is null)
-        {
-            projectDir = ValidateProjectDirectory(GetProjectDirectory(projectDirectory));
-            buildContext = projectDir;
-        }
-        else
-        {
-            buildContext = GetProjectDirectory(workspaceRoot);
-            projectDir = ValidateProjectDirectory(new DirectoryInfo(Path.Combine(buildContext.FullName, projectDirectory)));
-        }
-
-        return (buildContext, projectDir);
-    }
-
-    private static DirectoryInfo ValidateProjectDirectory(DirectoryInfo projectDirectory)
-    {
-        DeploymentLogger.Log($"Project directory: {projectDirectory.FullName}");
-
-        if (!File.Exists(Path.Combine(projectDirectory.FullName, "Dockerfile")))
-        {
-            throw new FileNotFoundException($"Dockerfile not found in: {projectDirectory.FullName}");
-        }
-        return projectDirectory;
-    }
 
     private async Task<ContainerRegistryResource> CreateContainerRegistry(ResourceGroup resourceGroup, string name)
     {
@@ -553,18 +526,6 @@ public class AzureCloud
         throw new TimeoutException($"Container App at {appUrl} did not become ready within {timeoutMinutes} minutes");
     }
 
-    private static DirectoryInfo GetProjectDirectory(string projectDirectory)
-    {
-        var currentDirectory = new DirectoryInfo(Directory.GetCurrentDirectory());
-        var projectDir = currentDirectory.Parent!.Parent!.Parent!.Parent!
-            .GetDirectories(projectDirectory, SearchOption.AllDirectories)
-            .FirstOrDefault();
-        if (projectDir == null)
-        {
-            throw new DirectoryNotFoundException($"Project directory not found: {projectDirectory}");
-        }
-        return projectDir;
-    }
 
     private async Task DeployZipFile(string zipFilePath, string serviceName)
     {
