@@ -25,7 +25,31 @@ public class ContainerAppTests
             $"Resource group '{containerAppName}' should have been cleaned up after deployment failure");
     }
 
-    [Test]
+    [Test, Category("LongRunning")]
+    public async Task DeployContainerApp_WhenCallerProjectIsAtSolutionRoot_DeploysSuccessfully()
+    {
+        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        string containerAppName = GenerateContainerAppName();
+        string workingDirectory = Path.Combine("TestContainerAppWithProjectDependencies", "CallerProject", "bin", "Debug", "net8.0");
+
+        await Utils.RunTestFromDirectory(workingDirectory, async () =>
+        {
+            await using var containerApp = await azure.DeployContainerApp(
+                projectDirectory: "App",
+                name: containerAppName,
+                workspaceRoot: ".");
+
+            await AssertResourceGroupExists(azure, containerAppName);
+            using var client = new HttpClient { BaseAddress = new Uri(containerApp.Url) };
+            var response = await client.GetAsync("/");
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            string content = await response.Content.ReadAsStringAsync();
+            Assert.That(content, Is.EqualTo("TestContainerAppWithProjectDependencies deployment successful!"));
+        });
+    }
+
+
+    [Test, Category("LongRunning")]
     public async Task DeployContainerApp_WithProjectDependencies()
     {
         var azure = new AzureCloud(location: AzureLocation.EastUS);
