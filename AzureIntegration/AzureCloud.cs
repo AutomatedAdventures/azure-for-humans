@@ -187,7 +187,8 @@ public class AzureCloud
         string projectDirectory,
         string name,
         Dictionary<string, string>? environmentVariables = null,
-        string? workspaceRoot = null)
+        string? workspaceRoot = null,
+        Dictionary<string, string>? dockerBuildArguments = null)
     {
         DeploymentLogger.Start($"Starting Container App deployment: {name}");
 
@@ -199,7 +200,7 @@ public class AzureCloud
         {
             var acr = await CreateContainerRegistry(resourceGroup, name);
 
-            string imageName = await BuildAndPushImage(projectDir, buildContext, acr, name);
+            string imageName = await BuildAndPushImage(projectDir, buildContext, acr, name, dockerBuildArguments);
 
             var environment = await CreateContainerAppsEnvironment(resourceGroup, name);
             var containerApp = await CreateContainerApp(resourceGroup, environment, acr, name, imageName, environmentVariables);
@@ -238,14 +239,14 @@ public class AzureCloud
         return acrName.Length > 50 ? acrName[..50] : acrName;
     }
 
-    private static async Task<string> BuildAndPushImage(DirectoryInfo projectDir, DirectoryInfo buildContext, ContainerRegistryResource acr, string name)
+    private static async Task<string> BuildAndPushImage(DirectoryInfo projectDir, DirectoryInfo buildContext, ContainerRegistryResource acr, string name, Dictionary<string, string>? dockerBuildArguments)
     {
         var credentials = await acr.GetCredentialsAsync();
         string loginServer = acr.Data.LoginServer;
         string username = credentials.Value.Username;
         string password = credentials.Value.Passwords.First().Value;
 
-        await BuildAndPushDockerImage(projectDir, buildContext, loginServer, username, password, name.ToLower());
+        await BuildAndPushDockerImage(projectDir, buildContext, loginServer, username, password, name.ToLower(), dockerBuildArguments);
         return $"{loginServer}/{name.ToLower()}:latest";
     }
 
@@ -255,7 +256,8 @@ public class AzureCloud
         string acrLoginServer,
         string acrUsername,
         string acrPassword,
-        string imageName)
+        string imageName,
+        Dictionary<string, string>? dockerBuildArguments)
     {
         await VerifyDockerAvailable();
         await DockerLogin(acrLoginServer, acrUsername, acrPassword);
@@ -263,7 +265,7 @@ public class AzureCloud
         string imageTag = $"{acrLoginServer}/{imageName}:latest";
         string dockerfilePath = Path.GetRelativePath(buildContext.FullName, Path.Combine(projectDir.FullName, "Dockerfile"))
             .Replace('\\', '/');
-        await DockerBuild(buildContext, imageTag, dockerfilePath);
+        await DockerBuild(buildContext, imageTag, dockerfilePath, dockerBuildArguments);
         await DockerPush(imageTag);
     }
 
@@ -320,15 +322,18 @@ public class AzureCloud
         DeploymentLogger.Log("Docker login successful");
     }
 
-    private static async Task DockerBuild(DirectoryInfo buildContext, string imageTag, string dockerfilePath)
+    private static async Task DockerBuild(DirectoryInfo buildContext, string imageTag, string dockerfilePath, Dictionary<string, string>? dockerBuildArguments)
     {
         DeploymentLogger.Log($"Building Docker image {imageTag}...");
+        string buildArgsString = dockerBuildArguments is { Count: > 0 }
+            ? string.Join(" ", dockerBuildArguments.Select(a => $"--build-arg {a.Key}={a.Value}"))
+            : string.Empty;
         var process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
                 FileName = "docker",
-                Arguments = $"build --platform linux/amd64 -t {imageTag} -f {dockerfilePath} .",
+                Arguments = $"build --platform linux/amd64 -t {imageTag} -f {dockerfilePath} {buildArgsString} .",
                 WorkingDirectory = buildContext.FullName,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
