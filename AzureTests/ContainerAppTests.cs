@@ -1,6 +1,6 @@
-using System.Net;
 using Azure.Core;
 using AzureIntegration;
+using System.Net;
 
 namespace AzureTests;
 
@@ -110,6 +110,50 @@ public class ContainerAppTests
         await AssertResourceGroupExists(azure, containerAppName);
         await AssertContainerAppRespondsWithExpectedContent(containerApp);
         await AssertEnvironmentVariablesAreAccessible(containerApp, envVars);
+        await AssertLogsAppearInApplicationInsights(containerApp);
+    }
+
+    private static async Task AssertLogsAppearInApplicationInsights(AzureContainerApp containerApp)
+    {
+        var expectedLog = "TestContainerApp request received.";
+        var timeout = TimeSpan.FromMinutes(5);
+
+        var logs = await WaitForLogToAppear(containerApp, expectedLog, timeout);
+
+        Assert.That(logs.FirstOrDefault(log => log.Contains(expectedLog)), Is.Not.Null,
+            $"Expected log not found in Application Insights within {timeout.TotalMinutes} minutes");
+    }
+
+    private static async Task<IEnumerable<string>> WaitForLogToAppear(
+        AzureContainerApp containerApp,
+        string expectedLog,
+        TimeSpan timeout)
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var pollingInterval = TimeSpan.FromSeconds(10);
+
+        Console.WriteLine($"Waiting for Application Insights logs to appear (timeout: {timeout.TotalMinutes} min)...");
+
+        IEnumerable<string> logs = [];
+
+        while (stopwatch.Elapsed < timeout)
+        {
+            logs = containerApp.GetLogsFromApplicationInsights();
+
+            if (logs.Any(log => log.Contains(expectedLog)))
+            {
+                Console.WriteLine($"Application Insights logs found after {stopwatch.Elapsed.TotalSeconds:F1} seconds");
+                return logs;
+            }
+
+            if (stopwatch.Elapsed < timeout)
+            {
+                Console.WriteLine($"Logs not ready yet. Waiting {pollingInterval.TotalSeconds} more seconds... (elapsed: {stopwatch.Elapsed.TotalSeconds:F1}s)");
+                await Task.Delay(pollingInterval);
+            }
+        }
+
+        return logs;
     }
 
     private static async Task AssertResourceGroupExists(AzureCloud azure, string containerAppName)

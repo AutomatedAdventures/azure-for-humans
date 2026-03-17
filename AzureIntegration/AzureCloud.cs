@@ -202,8 +202,9 @@ public class AzureCloud
 
             string imageName = await BuildAndPushImage(projectDir, buildContext, acr, name, dockerBuildArguments);
 
+            var applicationInsights = await resourceGroup.CreateApplicationInsights(name);
             var environment = await CreateContainerAppsEnvironment(resourceGroup, name);
-            var containerApp = await CreateContainerApp(resourceGroup, environment, acr, name, imageName, environmentVariables);
+            var containerApp = await CreateContainerApp(resourceGroup, environment, acr, name, imageName, environmentVariables, applicationInsights);
 
             DeploymentLogger.Log($"Deployment complete: {containerApp.Url}");
             return containerApp;
@@ -215,7 +216,6 @@ public class AzureCloud
             throw;
         }
     }
-
 
     private async Task<ContainerRegistryResource> CreateContainerRegistry(ResourceGroup resourceGroup, string name)
     {
@@ -437,12 +437,20 @@ public class AzureCloud
         ContainerRegistryResource acr,
         string name,
         string imageName,
-        Dictionary<string, string>? environmentVariables)
+        Dictionary<string, string>? environmentVariables,
+        ApplicationInsights applicationInsights)
     {
         DeploymentLogger.Log($"Creating Container App '{name}'...");
 
         var credentials = await acr.GetCredentialsAsync();
-        var container = BuildContainer(name, imageName, environmentVariables);
+        var appiEnvVars = new Dictionary<string, string>
+        {
+            { "APPLICATIONINSIGHTS_CONNECTION_STRING", applicationInsights.ConnectionString }
+        };
+        var mergedEnvVars = environmentVariables == null
+            ? appiEnvVars
+            : appiEnvVars.Concat(environmentVariables).ToDictionary(k => k.Key, v => v.Value);
+        var container = BuildContainer(name, imageName, mergedEnvVars);
         
         var containerAppData = new ContainerAppData(Location)
         {
@@ -488,7 +496,7 @@ public class AzureCloud
         
         await WaitForContainerAppToBeReady(fqdn);
 
-        return new AzureContainerApp(containerApp.Value.Data.Name, fqdn, resourceGroup.Resource.Data.Name, this);
+        return new AzureContainerApp(containerApp.Value.Data.Name, fqdn, resourceGroup.Resource.Data.Name, this, applicationInsights);
     }
 
     private static async Task WaitForContainerAppToBeReady(string fqdn, int timeoutMinutes = 10, int intervalSeconds = 30)
