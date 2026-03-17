@@ -94,7 +94,7 @@ public class AzureFunctionTests
         
         Console.WriteLine($"Waiting for Application Insights logs to appear (timeout: {timeout.TotalMinutes} min)...");
         
-        IEnumerable<string> logs = Array.Empty<string>();
+        IEnumerable<string> logs = [];
         
         while (stopwatch.Elapsed < timeout)
         {

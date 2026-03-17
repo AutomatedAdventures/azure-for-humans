@@ -1,7 +1,12 @@
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddApplicationInsightsTelemetry();
 var app = builder.Build();
 
-app.MapGet("/", () => "TestContainerApp deployment successful!");
+app.MapGet("/", (ILogger<Program> logger) =>
+{
+    logger.LogInformation("TestContainerApp request received.");
+    return "TestContainerApp deployment successful!";
+});
 app.MapGet("/variable/{name}", (string name) =>
 {
     string? value = Environment.GetEnvironmentVariable(name);

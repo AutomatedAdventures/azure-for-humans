@@ -18,10 +18,7 @@ public class AzureFunction(
         GC.SuppressFinalize(this);
     }
 
-    public IEnumerable<string> GetLogsFromApplicationInsights()
-    {
-        return applicationInsights.GetLogs();
-    }
+    public IEnumerable<string> GetLogsFromApplicationInsights() => applicationInsights.GetLogs();
 
     private async ValueTask DisposeAsync(bool deleteResourceGroup)
     {
