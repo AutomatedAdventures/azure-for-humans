@@ -111,6 +111,7 @@ public class ContainerAppTests
         await AssertContainerAppRespondsWithExpectedContent(containerApp);
         await AssertEnvironmentVariablesAreAccessible(containerApp, envVars);
         await AssertLogsAppearInApplicationInsights(containerApp);
+        await AssertLogsAppearInApplicationInsightsWithCustomKqlQuery(containerApp);
     }
 
     private static async Task AssertLogsAppearInApplicationInsights(AzureContainerApp containerApp)
@@ -124,10 +125,23 @@ public class ContainerAppTests
             $"Expected log not found in Application Insights within {timeout.TotalMinutes} minutes");
     }
 
+    private static async Task AssertLogsAppearInApplicationInsightsWithCustomKqlQuery(AzureContainerApp containerApp)
+    {
+        var expectedLog = "custom-kql:TestContainerApp request received.";
+        var customKqlQuery = "AppTraces | where Message != '' | project strcat('custom-kql:', Message) | limit 100";
+        var timeout = TimeSpan.FromMinutes(5);
+
+        var logs = await WaitForLogToAppear(containerApp, expectedLog, timeout, kqlQuery: customKqlQuery);
+
+        Assert.That(logs.FirstOrDefault(log => log.Contains(expectedLog)), Is.Not.Null,
+            $"Expected log not found using custom KQL query within {timeout.TotalMinutes} minutes");
+    }
+
     private static async Task<IEnumerable<string>> WaitForLogToAppear(
         AzureContainerApp containerApp,
         string expectedLog,
-        TimeSpan timeout)
+        TimeSpan timeout,
+        string? kqlQuery = null)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var pollingInterval = TimeSpan.FromSeconds(10);
@@ -138,7 +152,9 @@ public class ContainerAppTests
 
         while (stopwatch.Elapsed < timeout)
         {
-            logs = containerApp.GetLogsFromApplicationInsights();
+            logs = kqlQuery is null
+                ? containerApp.GetLogsFromApplicationInsights()
+                : containerApp.GetLogsFromApplicationInsights(kqlQuery);
 
             if (logs.Any(log => log.Contains(expectedLog)))
             {

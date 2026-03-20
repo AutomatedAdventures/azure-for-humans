@@ -22,6 +22,8 @@ public record ApplicationInsights
         return QueryLogs("AppTraces | where Message != '' | project Message | limit 100");
     }
 
+    public IEnumerable<string> GetLogs(string kqlQuery) => QueryLogs(kqlQuery);
+
     private IEnumerable<string> QueryLogs(string query)
     {
         var response = ExecuteQuery(query);
