@@ -11,7 +11,12 @@ using Azure.ResourceManager.AppService;
 using Azure.ResourceManager.AppService.Models;
 using Azure.ResourceManager.ContainerRegistry;
 using Azure.ResourceManager.ContainerRegistry.Models;
+using Azure.ResourceManager.KeyVault;
+using Azure.ResourceManager.KeyVault.Models;
+using Azure.ResourceManager.ManagedServiceIdentities;
+using Azure.ResourceManager.ManagedServiceIdentities.Models;
 using Azure.ResourceManager.Resources;
+using Azure.Security.KeyVault.Secrets;
 using Microsoft.Build.Evaluation;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Locator;
@@ -183,12 +188,55 @@ public class AzureCloud
         }
     }
 
+    public async Task<ManagedIdentity> CreateUserAssignedIdentity(string resourceGroupName, string identityName)
+    {
+        DeploymentLogger.Log($"Creating user-assigned managed identity '{identityName}' in '{resourceGroupName}'...");
+        var resourceGroup = await CreateResourceGroup(resourceGroupName);
+        var identityData = new UserAssignedIdentityData(Location);
+        var identity = await resourceGroup.Resource.GetUserAssignedIdentities()
+            .CreateOrUpdateAsync(WaitUntil.Completed, identityName, identityData);
+        DeploymentLogger.Log($"Managed identity created: {identity.Value.Data.PrincipalId}");
+        return new ManagedIdentity(identity.Value.Id.ToString(), identity.Value.Data.PrincipalId!.Value, identity.Value.Data.ClientId!.Value, resourceGroupName, this);
+    }
+
+    public async Task<AzureKeyVault> CreateKeyVaultWithSecret(
+        string resourceGroupName,
+        string secretName,
+        string secretValue,
+        Guid identityPrincipalId)
+    {
+        DeploymentLogger.Log($"Creating Key Vault in resource group '{resourceGroupName}'...");
+        var subscription = await GetSubscriptionAsync();
+        var resourceGroup = await CreateResourceGroup(resourceGroupName);
+        var tenantId = (await subscription.GetAsync()).Value.Data.TenantId!.Value;
+
+        string vaultName = $"kv-{resourceGroupName.Replace("-", "")[..Math.Min(18, resourceGroupName.Replace("-", "").Length)]}";
+        var deployerObjectId = await GetCurrentUserObjectIdAsync();
+        var vaultProperties = new KeyVaultProperties(tenantId, new KeyVaultSku(KeyVaultSkuFamily.A, KeyVaultSkuName.Standard));
+        vaultProperties.AccessPolicies.Add(new KeyVaultAccessPolicy(tenantId, identityPrincipalId.ToString(),
+            new IdentityAccessPermissions { Secrets = { IdentityAccessSecretPermission.Get } }));
+        vaultProperties.AccessPolicies.Add(new KeyVaultAccessPolicy(tenantId, deployerObjectId,
+            new IdentityAccessPermissions { Secrets = { IdentityAccessSecretPermission.Set } }));
+        var vault = await resourceGroup.Resource.GetKeyVaults()
+            .CreateOrUpdateAsync(WaitUntil.Completed, vaultName, new KeyVaultCreateOrUpdateContent(Location, vaultProperties));
+        DeploymentLogger.Log($"Key Vault created with access policy for managed identity: {vault.Value.Data.Properties.VaultUri}");
+
+        // Set the secret using the deployer's own credentials
+        var secretClient = new SecretClient(vault.Value.Data.Properties.VaultUri, _azureCredentials);
+        await secretClient.SetSecretAsync(secretName, secretValue);
+        DeploymentLogger.Log($"Secret '{secretName}' stored in Key Vault");
+
+        string vaultUri = vault.Value.Data.Properties.VaultUri!.ToString();
+        return new AzureKeyVault(vaultUri, resourceGroupName, this);
+    }
+
     public async Task<AzureContainerApp> DeployContainerApp(
         string projectDirectory,
         string name,
         Dictionary<string, string>? environmentVariables = null,
         string? workspaceRoot = null,
-        Dictionary<string, string>? dockerBuildArguments = null)
+        Dictionary<string, string>? dockerBuildArguments = null,
+        string? managedIdentityResourceId = null)
     {
         DeploymentLogger.Start($"Starting Container App deployment: {name}");
 
@@ -204,7 +252,7 @@ public class AzureCloud
 
             var applicationInsights = await resourceGroup.CreateApplicationInsights(name);
             var environment = await CreateContainerAppsEnvironment(resourceGroup, name);
-            var containerApp = await CreateContainerApp(resourceGroup, environment, acr, name, imageName, environmentVariables, applicationInsights);
+            var containerApp = await CreateContainerApp(resourceGroup, environment, acr, name, imageName, environmentVariables, applicationInsights, managedIdentityResourceId);
 
             DeploymentLogger.Log($"Deployment complete: {containerApp.Url}");
             return containerApp;
@@ -438,7 +486,8 @@ public class AzureCloud
         string name,
         string imageName,
         Dictionary<string, string>? environmentVariables,
-        ApplicationInsights applicationInsights)
+        ApplicationInsights applicationInsights,
+        string? managedIdentityResourceId = null)
     {
         DeploymentLogger.Log($"Creating Container App '{name}'...");
 
@@ -487,6 +536,15 @@ public class AzureCloud
                 Scale = new ContainerAppScale { MinReplicas = 1, MaxReplicas = 1 }
             }
         };
+
+        if (managedIdentityResourceId != null)
+        {
+            containerAppData.Identity = new Azure.ResourceManager.Models.ManagedServiceIdentity(
+                Azure.ResourceManager.Models.ManagedServiceIdentityType.UserAssigned);
+            containerAppData.Identity.UserAssignedIdentities.Add(
+                new ResourceIdentifier(managedIdentityResourceId),
+                new Azure.ResourceManager.Models.UserAssignedIdentity());
+        }
 
         var containerApp = await resourceGroup.Resource.GetContainerApps()
             .CreateOrUpdateAsync(WaitUntil.Completed, name, containerAppData);
@@ -752,5 +810,17 @@ public class AzureCloud
     public TokenCredential GetCredential()
     {
         return _azureCredentials;
+    }
+
+    private async Task<string> GetCurrentUserObjectIdAsync()
+    {
+        var token = await _azureCredentials.GetTokenAsync(
+            new TokenRequestContext(["https://management.azure.com/.default"]),
+            CancellationToken.None);
+        var payload = token.Token.Split('.')[1];
+        int padding = (4 - payload.Length % 4) % 4;
+        var json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(payload + new string('=', padding)));
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        return doc.RootElement.GetProperty("oid").GetString()!;
     }
 }

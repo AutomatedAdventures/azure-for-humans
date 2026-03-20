@@ -189,6 +189,40 @@ public class ContainerAppTests
         Assert.That(content, Is.EqualTo("TestContainerApp deployment successful!"));
     }
 
+    [Test, Category("LongRunning")]
+    public async Task DeployContainerApp_WithManagedIdentity_CanReadKeyVaultSecretViaIdentity()
+    {
+        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        string containerAppName = GenerateContainerAppName();
+        string secretValue = Guid.NewGuid().ToString();
+
+        await using var identity = await azure.CreateUserAssignedIdentity(
+            resourceGroupName: $"{containerAppName}-id",
+            identityName: $"{containerAppName}-id");
+
+        await using var keyVault = await azure.CreateKeyVaultWithSecret(
+            resourceGroupName: $"{containerAppName}-kv",
+            secretName: "test-secret",
+            secretValue: secretValue,
+            identityPrincipalId: identity.PrincipalId);
+
+        await using var containerApp = await azure.DeployContainerApp(
+            projectDirectory: "TestContainerApp",
+            name: containerAppName,
+            managedIdentityResourceId: identity.ResourceId,
+            environmentVariables: new Dictionary<string, string>
+            {
+                { "AZURE_CLIENT_ID", identity.ClientId.ToString() },
+                { "KEY_VAULT_URI", keyVault.Uri },
+                { "KEY_VAULT_SECRET_NAME", "test-secret" }
+            });
+
+        using var client = new HttpClient { BaseAddress = new Uri(containerApp.Url) };
+        var response = await client.GetAsync("/keyvault-secret");
+        string retrievedSecret = await response.Content.ReadAsStringAsync();
+        Assert.That(retrievedSecret.Trim('"'), Is.EqualTo(secretValue));
+    }
+
     private static async Task AssertEnvironmentVariablesAreAccessible(
         AzureContainerApp containerApp, 
         Dictionary<string, string> envVars)
