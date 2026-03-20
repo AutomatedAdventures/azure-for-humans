@@ -8,6 +8,9 @@ public class AzureContainerApp(string name, string fqdn, string resourceGroupNam
 
     public IEnumerable<string> GetLogsFromApplicationInsights() => applicationInsights.GetLogs();
 
+    public IEnumerable<string> GetLogsFromApplicationInsights(string kqlQuery)
+        => applicationInsights.GetLogs(kqlQuery);
+
     public async ValueTask DisposeAsync()
     {
         await DisposeAsync(true);
