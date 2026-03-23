@@ -212,7 +212,6 @@ public class ContainerAppTests
             managedIdentityResourceId: identity.ResourceId,
             environmentVariables: new Dictionary<string, string>
             {
-                { "AZURE_CLIENT_ID", identity.ClientId.ToString() },
                 { "KEY_VAULT_URI", keyVault.Uri },
                 { "KEY_VAULT_SECRET_NAME", "test-secret" }
             });
