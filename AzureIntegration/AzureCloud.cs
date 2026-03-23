@@ -45,7 +45,7 @@ public class AzureCloud
         Location = location ?? AzureLocation.WestEurope;
     }
 
-    private async Task<SubscriptionResource> GetSubscriptionAsync()
+    internal async Task<SubscriptionResource> GetSubscriptionAsync()
     {
         if (_subscription == null)
         {
@@ -183,12 +183,23 @@ public class AzureCloud
         }
     }
 
+    public Task<ManagedIdentity> CreateUserAssignedIdentity(string resourceGroupName, string identityName)
+        => ManagedIdentity.CreateAsync(this, resourceGroupName, identityName);
+
+    public Task<AzureKeyVault> CreateKeyVaultWithSecret(
+        string resourceGroupName,
+        string secretName,
+        string secretValue,
+        Guid identityPrincipalId)
+        => AzureKeyVault.CreateAsync(this, resourceGroupName, secretName, secretValue, identityPrincipalId);
+
     public async Task<AzureContainerApp> DeployContainerApp(
         string projectDirectory,
         string name,
         Dictionary<string, string>? environmentVariables = null,
         string? workspaceRoot = null,
-        Dictionary<string, string>? dockerBuildArguments = null)
+        Dictionary<string, string>? dockerBuildArguments = null,
+        string? managedIdentityResourceId = null)
     {
         DeploymentLogger.Start($"Starting Container App deployment: {name}");
 
@@ -204,7 +215,7 @@ public class AzureCloud
 
             var applicationInsights = await resourceGroup.CreateApplicationInsights(name);
             var environment = await CreateContainerAppsEnvironment(resourceGroup, name);
-            var containerApp = await CreateContainerApp(resourceGroup, environment, acr, name, imageName, environmentVariables, applicationInsights);
+            var containerApp = await CreateContainerApp(resourceGroup, environment, acr, name, imageName, environmentVariables, applicationInsights, managedIdentityResourceId);
 
             DeploymentLogger.Log($"Deployment complete: {containerApp.Url}");
             return containerApp;
@@ -438,7 +449,8 @@ public class AzureCloud
         string name,
         string imageName,
         Dictionary<string, string>? environmentVariables,
-        ApplicationInsights applicationInsights)
+        ApplicationInsights applicationInsights,
+        string? managedIdentityResourceId = null)
     {
         DeploymentLogger.Log($"Creating Container App '{name}'...");
 
@@ -487,6 +499,15 @@ public class AzureCloud
                 Scale = new ContainerAppScale { MinReplicas = 1, MaxReplicas = 1 }
             }
         };
+
+        if (managedIdentityResourceId != null)
+        {
+            containerAppData.Identity = new Azure.ResourceManager.Models.ManagedServiceIdentity(
+                Azure.ResourceManager.Models.ManagedServiceIdentityType.UserAssigned);
+            containerAppData.Identity.UserAssignedIdentities.Add(
+                new ResourceIdentifier(managedIdentityResourceId),
+                new Azure.ResourceManager.Models.UserAssignedIdentity());
+        }
 
         var containerApp = await resourceGroup.Resource.GetContainerApps()
             .CreateOrUpdateAsync(WaitUntil.Completed, name, containerAppData);
