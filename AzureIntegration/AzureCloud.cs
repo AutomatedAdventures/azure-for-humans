@@ -774,16 +774,4 @@ public class AzureCloud
     {
         return _azureCredentials;
     }
-
-    internal async Task<string> GetCurrentUserObjectIdAsync()
-    {
-        var token = await _azureCredentials.GetTokenAsync(
-            new TokenRequestContext(["https://management.azure.com/.default"]),
-            CancellationToken.None);
-        var payload = token.Token.Split('.')[1];
-        int padding = (4 - payload.Length % 4) % 4;
-        var json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(payload + new string('=', padding)));
-        using var doc = System.Text.Json.JsonDocument.Parse(json);
-        return doc.RootElement.GetProperty("oid").GetString()!;
-    }
 }
