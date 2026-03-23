@@ -11,12 +11,7 @@ using Azure.ResourceManager.AppService;
 using Azure.ResourceManager.AppService.Models;
 using Azure.ResourceManager.ContainerRegistry;
 using Azure.ResourceManager.ContainerRegistry.Models;
-using Azure.ResourceManager.KeyVault;
-using Azure.ResourceManager.KeyVault.Models;
-using Azure.ResourceManager.ManagedServiceIdentities;
-using Azure.ResourceManager.ManagedServiceIdentities.Models;
 using Azure.ResourceManager.Resources;
-using Azure.Security.KeyVault.Secrets;
 using Microsoft.Build.Evaluation;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Locator;
@@ -50,7 +45,7 @@ public class AzureCloud
         Location = location ?? AzureLocation.WestEurope;
     }
 
-    private async Task<SubscriptionResource> GetSubscriptionAsync()
+    internal async Task<SubscriptionResource> GetSubscriptionAsync()
     {
         if (_subscription == null)
         {
@@ -188,47 +183,15 @@ public class AzureCloud
         }
     }
 
-    public async Task<ManagedIdentity> CreateUserAssignedIdentity(string resourceGroupName, string identityName)
-    {
-        DeploymentLogger.Log($"Creating user-assigned managed identity '{identityName}' in '{resourceGroupName}'...");
-        var resourceGroup = await CreateResourceGroup(resourceGroupName);
-        var identityData = new UserAssignedIdentityData(Location);
-        var identity = await resourceGroup.Resource.GetUserAssignedIdentities()
-            .CreateOrUpdateAsync(WaitUntil.Completed, identityName, identityData);
-        DeploymentLogger.Log($"Managed identity created: {identity.Value.Data.PrincipalId}");
-        return new ManagedIdentity(identity.Value.Id.ToString(), identity.Value.Data.PrincipalId!.Value, identity.Value.Data.ClientId!.Value, resourceGroupName, this);
-    }
+    public Task<ManagedIdentity> CreateUserAssignedIdentity(string resourceGroupName, string identityName)
+        => ManagedIdentity.CreateAsync(this, resourceGroupName, identityName);
 
-    public async Task<AzureKeyVault> CreateKeyVaultWithSecret(
+    public Task<AzureKeyVault> CreateKeyVaultWithSecret(
         string resourceGroupName,
         string secretName,
         string secretValue,
         Guid identityPrincipalId)
-    {
-        DeploymentLogger.Log($"Creating Key Vault in resource group '{resourceGroupName}'...");
-        var subscription = await GetSubscriptionAsync();
-        var resourceGroup = await CreateResourceGroup(resourceGroupName);
-        var tenantId = (await subscription.GetAsync()).Value.Data.TenantId!.Value;
-
-        string vaultName = $"kv-{resourceGroupName.Replace("-", "")[..Math.Min(18, resourceGroupName.Replace("-", "").Length)]}";
-        var deployerObjectId = await GetCurrentUserObjectIdAsync();
-        var vaultProperties = new KeyVaultProperties(tenantId, new KeyVaultSku(KeyVaultSkuFamily.A, KeyVaultSkuName.Standard));
-        vaultProperties.AccessPolicies.Add(new KeyVaultAccessPolicy(tenantId, identityPrincipalId.ToString(),
-            new IdentityAccessPermissions { Secrets = { IdentityAccessSecretPermission.Get } }));
-        vaultProperties.AccessPolicies.Add(new KeyVaultAccessPolicy(tenantId, deployerObjectId,
-            new IdentityAccessPermissions { Secrets = { IdentityAccessSecretPermission.Set } }));
-        var vault = await resourceGroup.Resource.GetKeyVaults()
-            .CreateOrUpdateAsync(WaitUntil.Completed, vaultName, new KeyVaultCreateOrUpdateContent(Location, vaultProperties));
-        DeploymentLogger.Log($"Key Vault created with access policy for managed identity: {vault.Value.Data.Properties.VaultUri}");
-
-        // Set the secret using the deployer's own credentials
-        var secretClient = new SecretClient(vault.Value.Data.Properties.VaultUri, _azureCredentials);
-        await secretClient.SetSecretAsync(secretName, secretValue);
-        DeploymentLogger.Log($"Secret '{secretName}' stored in Key Vault");
-
-        string vaultUri = vault.Value.Data.Properties.VaultUri!.ToString();
-        return new AzureKeyVault(vaultUri, resourceGroupName, this);
-    }
+        => AzureKeyVault.CreateAsync(this, resourceGroupName, secretName, secretValue, identityPrincipalId);
 
     public async Task<AzureContainerApp> DeployContainerApp(
         string projectDirectory,
@@ -812,7 +775,7 @@ public class AzureCloud
         return _azureCredentials;
     }
 
-    private async Task<string> GetCurrentUserObjectIdAsync()
+    internal async Task<string> GetCurrentUserObjectIdAsync()
     {
         var token = await _azureCredentials.GetTokenAsync(
             new TokenRequestContext(["https://management.azure.com/.default"]),
