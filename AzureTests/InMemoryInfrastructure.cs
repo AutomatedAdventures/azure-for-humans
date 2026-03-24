@@ -5,7 +5,7 @@ namespace AzureTests;
 
 internal class InMemoryInfrastructure : IInfrastructure
 {
-    public const string AcrPassword = "fake-acr-password-s3cr3t";
+    public string RegistryPassword { get; } = "fake-acr-password-s3cr3t";
     private const string AcrLoginServer = "fakeregistry.azurecr.io";
     private const string AcrUsername = "fakeuser";
 
@@ -26,7 +26,7 @@ internal class InMemoryInfrastructure : IInfrastructure
 
     public Task<ContainerRegistryInfo> CreateContainerRegistry(string resourceGroupName, string registryName)
     {
-        return Task.FromResult(new ContainerRegistryInfo(AcrLoginServer, AcrUsername, AcrPassword));
+        return Task.FromResult(new ContainerRegistryInfo(AcrLoginServer, AcrUsername, RegistryPassword));
     }
 
     public Task<ApplicationInsights> CreateApplicationInsights(string resourceGroupName, string name)

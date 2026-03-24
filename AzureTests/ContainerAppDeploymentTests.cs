@@ -4,38 +4,31 @@ namespace AzureTests;
 
 public class ContainerAppDeploymentTests
 {
-    [Test]
-    public async Task Deploy_DoesNotExposePasswordInDockerCommandLineArguments()
+    private readonly InMemoryInfrastructure _infrastructure = new();
+    private readonly DockerProcessSpy _docker = new();
+
+    [SetUp]
+    public async Task DeployContainerApp()
     {
-        var docker = new DockerProcessSpy();
         var azure = new AzureCloud(
-            infrastructure: new InMemoryInfrastructure(),
-            dockerProcessRunner: docker);
+            infrastructure: _infrastructure,
+            dockerProcessRunner: _docker);
 
         await azure.DeployContainerApp(
             projectDirectory: "TestContainerApp",
             name: "my-app");
-
-        var loginCall = docker.Calls.First(c => c.Arguments.Contains("login"));
-        Assert.That(loginCall.Arguments, Does.Not.Contain(InMemoryInfrastructure.AcrPassword),
-            "Password must not appear in CLI arguments to prevent exposure in process list or logs");
     }
 
     [Test]
-    public async Task Deploy_SendsPasswordViaStandardInput()
+    public void RegistryPassword_IsNotExposedInCommandLineArguments()
     {
-        var docker = new DockerProcessSpy();
-        var azure = new AzureCloud(
-            infrastructure: new InMemoryInfrastructure(),
-            dockerProcessRunner: docker);
+        Assert.That(_docker.LoginCall.Arguments, Does.Not.Contain(_infrastructure.RegistryPassword));
+    }
 
-        await azure.DeployContainerApp(
-            projectDirectory: "TestContainerApp",
-            name: "my-app");
-
-        var loginCall = docker.Calls.First(c => c.Arguments.Contains("login"));
-        Assert.That(loginCall.StdinInput, Is.EqualTo(InMemoryInfrastructure.AcrPassword),
-            "Password should be sent via stdin using --password-stdin");
+    [Test]
+    public void RegistryPassword_IsSentViaStandardInput()
+    {
+        Assert.That(_docker.LoginCall.StdinInput, Is.EqualTo(_infrastructure.RegistryPassword));
     }
 }
 
@@ -44,6 +37,7 @@ internal record DockerProcessCall(string Arguments, string? StdinInput, string? 
 internal class DockerProcessSpy : IDockerProcessRunner
 {
     public List<DockerProcessCall> Calls { get; } = new();
+    public DockerProcessCall LoginCall => Calls.First(c => c.Arguments.Contains("login"));
 
     public Task<DockerResult> RunAsync(string arguments, string? stdinInput = null, string? workingDirectory = null)
     {
