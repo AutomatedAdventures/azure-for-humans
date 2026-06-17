@@ -23,6 +23,8 @@ public class AzureCloud
 {
     private readonly TokenCredential _azureCredentials;
     private readonly ArmClient _armClient;
+    private readonly IArmClient _arm;
+    private readonly IReadOnlyList<AzureLocation> _locations;
     private SubscriptionResource _subscription;
     public AzureLocation Location { get; }
 
@@ -39,15 +41,30 @@ public class AzureCloud
 
     public AzureCloud(IEnumerable<AzureLocation> locations) : this(new DefaultAzureCredential())
     {
-        Location = locations.First();
+        var configuredLocations = locations.ToArray();
+        Location = configuredLocations.First();
+        _locations = configuredLocations;
+    }
+
+    public AzureCloud(IArmClient armClient, IEnumerable<AzureLocation> locations)
+    {
+        _arm = armClient;
+        var configuredLocations = locations.ToArray();
+        Location = configuredLocations.First();
+        _locations = configuredLocations;
+        _azureCredentials = null!;
+        _armClient = null!;
+        _subscription = null!;
     }
 
     public AzureCloud(TokenCredential credentials, AzureLocation? location = null)
     {
         _azureCredentials = credentials;
         _armClient = new ArmClient(_azureCredentials);
+        _arm = new ArmClientAdapter(_armClient);
         _subscription = null!;
         Location = location ?? AzureLocation.WestEurope;
+        _locations = new[] { Location };
     }
 
     internal async Task<SubscriptionResource> GetSubscriptionAsync()
@@ -72,10 +89,23 @@ public class AzureCloud
 
     public async Task<ResourceGroup> CreateResourceGroup(string name)
     {
-        var subscription = await GetSubscriptionAsync();
-        var resourceGroupData = new ResourceGroupData(Location);
-        var operationResult = await subscription.GetResourceGroups().CreateOrUpdateAsync(WaitUntil.Completed, name, resourceGroupData);
-        return new ResourceGroup(operationResult.Value, this);
+        var subscription = await _arm.GetDefaultSubscriptionAsync();
+        foreach (var location in _locations)
+        {
+            try
+            {
+                var createdResourceGroup = await subscription.GetResourceGroups()
+                    .CreateOrUpdateAsync(WaitUntil.Completed, name, new ResourceGroupData(location));
+                return new ResourceGroup(createdResourceGroup.Concrete!, this);
+            }
+            catch (RequestFailedException ex) when (ex.ErrorCode == "AKSCapacityHeavyUsage")
+            {
+                DeploymentLogger.Log($"Region '{location}' has no capacity, trying the next configured region...");
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"None of the configured regions had capacity to create resource group '{name}'.");
     }
 
     public async Task DeleteResourceGroup(string name)
