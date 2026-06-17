@@ -90,6 +90,7 @@ public class AzureCloud
     public async Task<ResourceGroup> CreateResourceGroup(string name)
     {
         var subscription = await _arm.GetDefaultSubscriptionAsync();
+        RequestFailedException? lastCapacityError = null;
         foreach (var location in _locations)
         {
             try
@@ -100,12 +101,12 @@ public class AzureCloud
             }
             catch (RequestFailedException ex) when (ex.ErrorCode == "AKSCapacityHeavyUsage")
             {
+                lastCapacityError = ex;
                 DeploymentLogger.Log($"Region '{location}' has no capacity, trying the next configured region...");
             }
         }
 
-        throw new InvalidOperationException(
-            $"None of the configured regions had capacity to create resource group '{name}'.");
+        throw lastCapacityError!;
     }
 
     public async Task DeleteResourceGroup(string name)
