@@ -86,6 +86,20 @@ public class AzureCloud
         return await subscription.GetResourceGroups().ExistsAsync(name);
     }
 
+    public async Task<bool> ContainerRegistryExists(string resourceId)
+    {
+        var registry = _armClient.GetContainerRegistryResource(new ResourceIdentifier(resourceId));
+        try
+        {
+            await registry.GetAsync();
+            return true;
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            return false;
+        }
+    }
+
     public async Task<AzureFunction> DeployAzureFunction(
         string projectDirectory, string name, Dictionary<string, string>? environmentVariables = null)
     {
@@ -193,13 +207,17 @@ public class AzureCloud
         Guid identityPrincipalId)
         => AzureKeyVault.CreateAsync(this, resourceGroupName, secretName, secretValue, identityPrincipalId);
 
+    public Task<ContainerRegistry> CreateContainerRegistry(string resourceGroupName, string registryName)
+        => ContainerRegistry.CreateAsync(this, resourceGroupName, registryName);
+
     public async Task<AzureContainerApp> DeployContainerApp(
         string projectDirectory,
         string name,
         Dictionary<string, string>? environmentVariables = null,
         string? workspaceRoot = null,
         Dictionary<string, string>? dockerBuildArguments = null,
-        string? managedIdentityResourceId = null)
+        string? managedIdentityResourceId = null,
+        string? containerRegistryResourceId = null)
     {
         DeploymentLogger.Start($"Starting Container App deployment: {name}");
 
@@ -209,7 +227,7 @@ public class AzureCloud
 
         try
         {
-            var acr = await CreateContainerRegistry(resourceGroup, name);
+            var acr = await ResolveContainerRegistry(resourceGroup, name, containerRegistryResourceId);
 
             string imageName = await BuildAndPushImage(projectDir, buildContext, acr, name, dockerBuildArguments);
 
@@ -242,6 +260,23 @@ public class AzureCloud
         
         DeploymentLogger.Log($"Container Registry created: {acr.Value.Data.LoginServer}");
         return acr.Value;
+    }
+
+    private async Task<ContainerRegistryResource> ResolveContainerRegistry(
+        ResourceGroup resourceGroup,
+        string name,
+        string? containerRegistryResourceId)
+    {
+        if (string.IsNullOrWhiteSpace(containerRegistryResourceId))
+        {
+            return await CreateContainerRegistry(resourceGroup, name);
+        }
+
+        DeploymentLogger.Log($"Using existing Container Registry '{containerRegistryResourceId}'...");
+        var existingRegistry = _armClient.GetContainerRegistryResource(new ResourceIdentifier(containerRegistryResourceId));
+        var existingRegistryResponse = await existingRegistry.GetAsync();
+        DeploymentLogger.Log($"Using existing Container Registry server: {existingRegistryResponse.Value.Data.LoginServer}");
+        return existingRegistryResponse.Value;
     }
 
     private static string SanitizeAcrName(string name)

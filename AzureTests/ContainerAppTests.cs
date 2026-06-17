@@ -222,6 +222,48 @@ public class ContainerAppTests
         Assert.That(retrievedSecret.Trim('"'), Is.EqualTo(secretValue));
     }
 
+    [Test, Category("LongRunning")]
+    public async Task DeployContainerApp_UsesTheProvidedContainerRegistry()
+    {
+        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        string containerAppName = GenerateContainerAppName();
+
+        await using var providedRegistry = await azure.CreateContainerRegistry(
+            resourceGroupName: $"{containerAppName}-registry",
+            registryName: $"existingregistry{Guid.NewGuid().ToString("N")[..8]}");
+
+        await using var containerApp = await azure.DeployContainerApp(
+            projectDirectory: "TestContainerApp",
+            name: containerAppName,
+            containerRegistryResourceId: providedRegistry.ResourceId);
+
+        bool imageIsHostedInProvidedRegistry = await providedRegistry.ContainsImage(containerAppName.ToLower());
+        Assert.That(imageIsHostedInProvidedRegistry, Is.True,
+            "Expected the provided container registry to host the deployed image, but the deployment used a different registry.");
+    }
+
+    [Test, Category("LongRunning")]
+    public async Task DisposingContainerApp_DoesNotRemoveTheProvidedContainerRegistry()
+    {
+        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        string containerAppName = GenerateContainerAppName();
+        string registryResourceGroupName = $"{containerAppName}-registry";
+
+        await using var providedRegistry = await azure.CreateContainerRegistry(
+            resourceGroupName: registryResourceGroupName,
+            registryName: $"existingregistry{Guid.NewGuid().ToString("N")[..8]}");
+
+        var containerApp = await azure.DeployContainerApp(
+            projectDirectory: "TestContainerApp",
+            name: containerAppName,
+            containerRegistryResourceId: providedRegistry.ResourceId);
+        await containerApp.DisposeAsync();
+
+        bool providedRegistryStillExists = await providedRegistry.Exists();
+        Assert.That(providedRegistryStillExists, Is.True,
+            "Disposing the container app should not remove the container registry that was provided by the caller.");
+    }
+
     private static async Task AssertEnvironmentVariablesAreAccessible(
         AzureContainerApp containerApp, 
         Dictionary<string, string> envVars)
