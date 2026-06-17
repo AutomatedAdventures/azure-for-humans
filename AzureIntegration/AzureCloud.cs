@@ -37,6 +37,11 @@ public class AzureCloud
     {
     }
 
+    public AzureCloud(IEnumerable<AzureLocation> locations) : this(new DefaultAzureCredential())
+    {
+        Location = locations.First();
+    }
+
     public AzureCloud(TokenCredential credentials, AzureLocation? location = null)
     {
         _azureCredentials = credentials;
