@@ -5,7 +5,7 @@ namespace AzureTests;
 
 public class AuthenticationTests
 {
-    [Test]
+    [Test, Category("RealAzure")]
     public void CheckAzureEnvironmentVariablesAreDefined()
     {
         Assert.Multiple(() =>
@@ -16,7 +16,7 @@ public class AuthenticationTests
         });
     }
 
-    [Test, Category("LongRunning")]
+    [Test, Category("RealAzure")]
     public void PassUserTokenCredentials()
     {
         var azure = new AzureCloud(new DefaultAzureCredential());

@@ -61,7 +61,7 @@ public class ContainerRegistryTests
             "A registry that was just created should report that it exists.");
     }
 
-    [Test, Category("LongRunning")]
+    [Test, Category("RealAzure")]
     public async Task Exists_AfterRegistryWasDeleted_ReturnsFalse()
     {
         var azure = new AzureCloud(location: AzureLocation.EastUS);

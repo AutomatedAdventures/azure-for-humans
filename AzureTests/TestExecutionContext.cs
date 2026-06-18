@@ -14,7 +14,7 @@ public abstract class TestExecutionContext : IAsyncDisposable
     public static IEnumerable<TestCaseData> All()
     {
         yield return new TestCaseData(new FakeExecutionContext());
-        yield return new TestCaseData(new RealExecutionContext()).SetCategory("LongRunning");
+        yield return new TestCaseData(new RealExecutionContext()).SetCategory("RealAzure");
     }
 }
 

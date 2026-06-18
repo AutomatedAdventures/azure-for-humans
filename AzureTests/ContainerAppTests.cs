@@ -9,7 +9,7 @@ public class ContainerAppTests
     private static string GenerateContainerAppName() =>
         $"testcontainerapp-{Guid.NewGuid().ToString("N")[..8]}";
 
-    [Test, Category("LongRunning")]
+    [Test, Category("RealAzure")]
     public async Task DeployContainerApp_WhenDeploymentFails_CleansUpResources()
     {
         var azure = new AzureCloud();
@@ -25,7 +25,7 @@ public class ContainerAppTests
             $"Resource group '{containerAppName}' should have been cleaned up after deployment failure");
     }
 
-    [Test, Category("LongRunning")]
+    [Test, Category("RealAzure")]
     public async Task DeployContainerApp_WhenCallerProjectIsAtSolutionRoot_DeploysSuccessfully()
     {
         var azure = new AzureCloud(location: AzureLocation.EastUS);
@@ -49,7 +49,7 @@ public class ContainerAppTests
     }
 
 
-    [Test, Category("LongRunning")]
+    [Test, Category("RealAzure")]
     public async Task DeployContainerApp_WithProjectDependencies()
     {
         var azure = new AzureCloud(location: AzureLocation.EastUS);
@@ -68,7 +68,7 @@ public class ContainerAppTests
         Assert.That(content, Is.EqualTo("TestContainerAppWithProjectDependencies deployment successful!"));
     }
 
-    [Test, Category("LongRunning")]
+    [Test, Category("RealAzure")]
     public async Task DeployContainerApp_WithDockerBuildArguments()
     {
         var azure = new AzureCloud(location: AzureLocation.EastUS);
@@ -91,7 +91,7 @@ public class ContainerAppTests
         Assert.That(value.Trim('"'), Is.EqualTo("hello-from-build-arg"));
     }
 
-    [Test, Category("LongRunning")]
+    [Test, Category("RealAzure")]
     public async Task DeployContainerApp()
     {
         var azure = new AzureCloud(location: AzureLocation.EastUS);
@@ -189,7 +189,7 @@ public class ContainerAppTests
         Assert.That(content, Is.EqualTo("TestContainerApp deployment successful!"));
     }
 
-    [Test, Category("LongRunning")]
+    [Test, Category("RealAzure")]
     public async Task DeployContainerApp_WithManagedIdentity_CanReadKeyVaultSecretViaIdentity()
     {
         var azure = new AzureCloud(location: AzureLocation.EastUS);
@@ -222,7 +222,7 @@ public class ContainerAppTests
         Assert.That(retrievedSecret.Trim('"'), Is.EqualTo(secretValue));
     }
 
-    [Test, Category("LongRunning")]
+    [Test, Category("RealAzure")]
     public async Task DeployContainerApp_UsesTheProvidedContainerRegistry()
     {
         var azure = new AzureCloud(location: AzureLocation.EastUS);
@@ -242,7 +242,7 @@ public class ContainerAppTests
             "Expected the provided container registry to host the deployed image, but the deployment used a different registry.");
     }
 
-    [Test, Category("LongRunning")]
+    [Test, Category("RealAzure")]
     public async Task DisposingContainerApp_DoesNotRemoveTheProvidedContainerRegistry()
     {
         var azure = new AzureCloud(location: AzureLocation.EastUS);
