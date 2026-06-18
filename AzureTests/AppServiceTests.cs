@@ -35,7 +35,7 @@ public class AppServiceTests
         var azure = context.Azure();
         string appServiceName = GenerateAppServiceName();
         await using var app = await azure.DeployAppService(projectDirectory: "TestAppService", name: appServiceName);
-        using var client = context.HttpClientFor(app);
+        using var client = context.HttpClientFor(app.Url);
         var response = await client.GetAsync("/");
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         string content = await response.Content.ReadAsStringAsync();
@@ -58,7 +58,7 @@ public class AppServiceTests
                 projectDirectory: "TestAppService",
                 name: appServiceName,
                 environmentVariables: envVars);
-        using var client = context.HttpClientFor(app);
+        using var client = context.HttpClientFor(app.Url);
         foreach (var kvp in envVars)
         {
             var response = await client.GetAsync($"/variable/{kvp.Key}");

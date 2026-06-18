@@ -3,14 +3,15 @@ using Azure.ResourceManager.AppService;
 namespace AzureIntegration;
 
 public class AzureFunction(
-    WebSiteResource functionApp, 
-    ApplicationInsights applicationInsights, 
-    string resourceGroupName, 
+    string name,
+    string url,
+    IApplicationLogs applicationInsights,
+    string resourceGroupName,
     AzureCloud azureCloud)
     : IAsyncDisposable
 {
-    public string Name => functionApp.Data.Name;
-    public string Url => functionApp.Data.DefaultHostName;
+    public string Name => name;
+    public string Url => url;
 
     public async ValueTask DisposeAsync()
     {

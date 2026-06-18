@@ -15,8 +15,12 @@ public class FakeArmClient : IArmClient
 
     public AzureLocation? RegionWhereResourceGroupWasCreated { get; private set; }
 
-    internal void RecordWebApp(string host, string projectDirectory, Dictionary<string, string>? environmentVariables) =>
-        _webApps[host] = new FakeWebApp(projectDirectory, environmentVariables ?? new());
+    internal FakeWebApp RecordWebApp(string host, string projectDirectory, Dictionary<string, string>? environmentVariables)
+    {
+        var app = new FakeWebApp(projectDirectory, environmentVariables ?? new());
+        _webApps[host] = app;
+        return app;
+    }
 
     internal FakeWebApp? WebAppAt(string host) => _webApps.GetValueOrDefault(host);
 
