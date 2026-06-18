@@ -42,10 +42,11 @@ public class AppServiceTests
         Assert.That(content, Is.EqualTo("TestAppService deployment successful!"));
     }
 
-    [Test, Category("RealAzure")]
-    public async Task DeployAppService_WithEnvironmentVariables()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployAppService_WithEnvironmentVariables(TestExecutionContext context)
     {
-        var azure = new AzureCloud();
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string appServiceName = GenerateAppServiceName();
         var envVars = new Dictionary<string, string>
                       {
@@ -57,8 +58,7 @@ public class AppServiceTests
                 projectDirectory: "TestAppService",
                 name: appServiceName,
                 environmentVariables: envVars);
-        using var client = new HttpClient();
-        client.BaseAddress = new Uri($"https://{appServiceName.ToLower()}.azurewebsites.net");
+        using var client = context.HttpClientFor(app);
         foreach (var kvp in envVars)
         {
             var response = await client.GetAsync($"/variable/{kvp.Key}");
