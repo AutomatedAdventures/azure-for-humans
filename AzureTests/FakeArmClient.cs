@@ -12,8 +12,13 @@ public class FakeArmClient : IArmClient
     private readonly Dictionary<string, FakeRegistry> _registries = new();
     private readonly HashSet<string> _resourceGroups = new();
     private readonly Dictionary<string, FakeWebApp> _webApps = new();
+    private readonly Dictionary<string, string> _imageProjects = new();
 
     public AzureLocation? RegionWhereResourceGroupWasCreated { get; private set; }
+
+    internal void RecordImageProject(string imageTag, string project) => _imageProjects[imageTag] = project;
+
+    internal string? ProjectForImage(string imageTag) => _imageProjects.GetValueOrDefault(imageTag);
 
     internal FakeWebApp RecordWebApp(string host, string projectDirectory, Dictionary<string, string>? environmentVariables)
     {

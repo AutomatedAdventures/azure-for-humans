@@ -6,3 +6,5 @@ var app = builder.Build();
 app.MapGet("/", () => Greeter.GetGreeting());
 
 await app.RunAsync();
+
+public partial class Program;

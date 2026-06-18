@@ -51,7 +51,7 @@ public class FakeContainerAppService(FakeArmClient arm) : IContainerAppService
         string? managedIdentityResourceId)
     {
         string fqdn = $"{name.ToLower()}.fake.azurecontainerapps.io";
-        var app = arm.RecordWebApp(fqdn, imageName.Split('/').Last().Split(':').First(), environmentVariables);
+        var app = arm.RecordWebApp(fqdn, arm.ProjectForImage(imageName) ?? name, environmentVariables);
         return Task.FromResult(new ContainerAppDeployment(fqdn, new FakeApplicationLogs(app)));
     }
 }

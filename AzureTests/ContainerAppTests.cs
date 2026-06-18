@@ -50,10 +50,11 @@ public class ContainerAppTests
     }
 
 
-    [Test, Category("RealAzure")]
-    public async Task DeployContainerApp_WithProjectDependencies()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp_WithProjectDependencies(TestExecutionContext context)
     {
-        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string containerAppName = GenerateContainerAppName();
 
         await using var containerApp = await azure.DeployContainerApp(
@@ -62,7 +63,7 @@ public class ContainerAppTests
             workspaceRoot: "TestContainerAppWithProjectDependencies");
 
         await AssertResourceGroupExists(azure, containerAppName);
-        using var client = new HttpClient { BaseAddress = new Uri(containerApp.Url) };
+        using var client = context.HttpClientFor(containerApp.Url);
         var response = await client.GetAsync("/");
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         string content = await response.Content.ReadAsStringAsync();
