@@ -43,10 +43,11 @@ public class ContainerRegistryTests
             "After pushing an image, the registry should report that it contains it.");
     }
 
-    [Test, Category("LongRunning")]
-    public async Task Exists_WhenRegistryWasCreated_ReturnsTrue()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task Exists_WhenRegistryWasCreated_ReturnsTrue(TestExecutionContext context)
     {
-        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string registryName = GenerateRegistryName();
 
         await using var registry = await azure.CreateContainerRegistry(

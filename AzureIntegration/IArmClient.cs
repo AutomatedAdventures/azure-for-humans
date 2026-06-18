@@ -10,6 +10,7 @@ namespace AzureIntegration;
 public interface IArmClient
 {
     Task<ISubscriptionResource> GetDefaultSubscriptionAsync();
+    IContainerRegistryResource GetContainerRegistryResource(ResourceIdentifier id);
 }
 
 public interface ISubscriptionResource
@@ -40,6 +41,7 @@ public interface IContainerRegistryResource
     string Id { get; }
     string LoginServer { get; }
     Task<IContainerRegistryCredentials> GetCredentialsAsync();
+    Task<bool> Exists();
 }
 
 public interface IContainerRegistryCredentials
@@ -52,6 +54,9 @@ internal class ArmClientAdapter(ArmClient armClient) : IArmClient
 {
     public async Task<ISubscriptionResource> GetDefaultSubscriptionAsync() =>
         new SubscriptionResourceAdapter(await armClient.GetDefaultSubscriptionAsync());
+
+    public IContainerRegistryResource GetContainerRegistryResource(ResourceIdentifier id) =>
+        new ContainerRegistryResourceAdapter(armClient.GetContainerRegistryResource(id));
 }
 
 internal class SubscriptionResourceAdapter(SubscriptionResource subscription) : ISubscriptionResource
@@ -104,6 +109,19 @@ internal class ContainerRegistryResourceAdapter(ContainerRegistryResource resour
     {
         var credentials = await resource.GetCredentialsAsync();
         return new ContainerRegistryCredentialsAdapter(credentials.Value);
+    }
+
+    public async Task<bool> Exists()
+    {
+        try
+        {
+            await resource.GetAsync();
+            return true;
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            return false;
+        }
     }
 }
 

@@ -22,6 +22,12 @@ public class FakeArmClient : IArmClient
     public Task<ISubscriptionResource> GetDefaultSubscriptionAsync() =>
         Task.FromResult<ISubscriptionResource>(new FakeSubscriptionResource(this));
 
+    public IContainerRegistryResource GetContainerRegistryResource(ResourceIdentifier id)
+    {
+        string loginServer = id.ToString().Split('/').Last();
+        return new FakeContainerRegistryResource(this, loginServer);
+    }
+
     internal bool HasCapacityIn(AzureLocation location) =>
         !_regionsWithoutCapacity.Contains(location);
 
@@ -84,17 +90,20 @@ internal class FakeContainerRegistryCollection(FakeArmClient armClient) : IConta
     public Task<IContainerRegistryResource> CreateOrUpdateAsync(WaitUntil waitUntil, string registryName, ContainerRegistryData data)
     {
         var registry = armClient.CreateRegistry(registryName);
-        return Task.FromResult<IContainerRegistryResource>(new FakeContainerRegistryResource(registry));
+        return Task.FromResult<IContainerRegistryResource>(new FakeContainerRegistryResource(armClient, registry.LoginServer));
     }
 }
 
-internal class FakeContainerRegistryResource(FakeRegistry registry) : IContainerRegistryResource
+internal class FakeContainerRegistryResource(FakeArmClient armClient, string loginServer) : IContainerRegistryResource
 {
-    public string Id => $"/fake/registries/{registry.LoginServer}";
-    public string LoginServer => registry.LoginServer;
+    public string Id => $"/fake/registries/{loginServer}";
+    public string LoginServer => loginServer;
 
     public Task<IContainerRegistryCredentials> GetCredentialsAsync() =>
         Task.FromResult<IContainerRegistryCredentials>(new FakeContainerRegistryCredentials());
+
+    public Task<bool> Exists() =>
+        Task.FromResult(armClient.RegistryAt(loginServer) != null);
 }
 
 internal class FakeContainerRegistryCredentials : IContainerRegistryCredentials

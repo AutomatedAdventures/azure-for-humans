@@ -134,16 +134,7 @@ public class AzureCloud
 
     public async Task<bool> ContainerRegistryExists(string resourceId)
     {
-        var registry = _armClient.GetContainerRegistryResource(new ResourceIdentifier(resourceId));
-        try
-        {
-            await registry.GetAsync();
-            return true;
-        }
-        catch (RequestFailedException ex) when (ex.Status == 404)
-        {
-            return false;
-        }
+        return await _arm.GetContainerRegistryResource(new ResourceIdentifier(resourceId)).Exists();
     }
 
     public async Task<AzureFunction> DeployAzureFunction(
