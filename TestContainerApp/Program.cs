@@ -12,7 +12,7 @@ app.MapGet("/", (ILogger<Program> logger) =>
 });
 app.MapGet("/variable/{name}", (string name) =>
 {
-    string? value = Environment.GetEnvironmentVariable(name);
+    string? value = app.Configuration[name];
     return value == null ? Results.NotFound($"Environment variable '{name}' not found") : Results.Ok(value);
 });
 app.MapGet("/keyvault-secret", async () =>
@@ -25,3 +25,8 @@ app.MapGet("/keyvault-secret", async () =>
 });
 
 await app.RunAsync();
+
+namespace ContainerApp
+{
+    public class AppMarker;
+}

@@ -26,6 +26,7 @@
     <ProjectReference Include="../AzureIntegration/AzureIntegration.csproj" />
     <ProjectReference Include="../TestContainerAppWithProjectDependencies/App/App.csproj" />
     <ProjectReference Include="../TestContainerAppWithDockerBuildArgs/TestContainerAppWithDockerBuildArgs.csproj" />
+    <ProjectReference Include="../TestContainerApp/TestContainerApp.csproj" />
   </ItemGroup>
   
   <ItemGroup>

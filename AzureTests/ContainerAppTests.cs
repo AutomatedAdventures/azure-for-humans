@@ -95,10 +95,11 @@ public class ContainerAppTests
         Assert.That(value.Trim('"'), Is.EqualTo("hello-from-build-arg"));
     }
 
-    [Test, Category("RealAzure")]
-    public async Task DeployContainerApp()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp(TestExecutionContext context)
     {
-        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string containerAppName = GenerateContainerAppName();
         var envVars = new Dictionary<string, string>
                       {
@@ -112,49 +113,50 @@ public class ContainerAppTests
             environmentVariables: envVars);
 
         await AssertResourceGroupExists(azure, containerAppName);
-        await AssertContainerAppRespondsWithExpectedContent(containerApp);
-        await AssertEnvironmentVariablesAreAccessible(containerApp, envVars);
-        await AssertLogsAppearInApplicationInsights(containerApp);
-        await AssertLogsAppearInApplicationInsightsWithCustomKqlQuery(containerApp);
+        await AssertContainerAppRespondsWithExpectedContent(context, containerApp);
+        await AssertEnvironmentVariablesAreAccessible(context, containerApp, envVars);
+        await AssertLogsAppearInApplicationInsights(context.Time, containerApp);
+        await AssertLogsAppearInApplicationInsightsWithCustomKqlQuery(context.Time, containerApp);
     }
 
-    private static async Task AssertLogsAppearInApplicationInsights(AzureContainerApp containerApp)
+    private static async Task AssertLogsAppearInApplicationInsights(TimeProvider time, AzureContainerApp containerApp)
     {
         var expectedLog = "TestContainerApp request received.";
         var timeout = TimeSpan.FromMinutes(5);
 
-        var logs = await WaitForLogToAppear(containerApp, expectedLog, timeout);
+        var logs = await WaitForLogToAppear(time, containerApp, expectedLog, timeout);
 
         Assert.That(logs.FirstOrDefault(log => log.Contains(expectedLog)), Is.Not.Null,
             $"Expected log not found in Application Insights within {timeout.TotalMinutes} minutes");
     }
 
-    private static async Task AssertLogsAppearInApplicationInsightsWithCustomKqlQuery(AzureContainerApp containerApp)
+    private static async Task AssertLogsAppearInApplicationInsightsWithCustomKqlQuery(TimeProvider time, AzureContainerApp containerApp)
     {
         var expectedLog = "custom-kql:TestContainerApp request received.";
         var customKqlQuery = "AppTraces | where Message != '' | project strcat('custom-kql:', Message) | limit 100";
         var timeout = TimeSpan.FromMinutes(5);
 
-        var logs = await WaitForLogToAppear(containerApp, expectedLog, timeout, kqlQuery: customKqlQuery);
+        var logs = await WaitForLogToAppear(time, containerApp, expectedLog, timeout, kqlQuery: customKqlQuery);
 
         Assert.That(logs.FirstOrDefault(log => log.Contains(expectedLog)), Is.Not.Null,
             $"Expected log not found using custom KQL query within {timeout.TotalMinutes} minutes");
     }
 
     private static async Task<IEnumerable<string>> WaitForLogToAppear(
+        TimeProvider time,
         AzureContainerApp containerApp,
         string expectedLog,
         TimeSpan timeout,
         string? kqlQuery = null)
     {
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var startedAt = time.GetUtcNow();
         var pollingInterval = TimeSpan.FromSeconds(10);
 
         Console.WriteLine($"Waiting for Application Insights logs to appear (timeout: {timeout.TotalMinutes} min)...");
 
         IEnumerable<string> logs = [];
 
-        while (stopwatch.Elapsed < timeout)
+        while (time.GetUtcNow() - startedAt < timeout)
         {
             logs = kqlQuery is null
                 ? containerApp.GetLogsFromApplicationInsights()
@@ -162,15 +164,10 @@ public class ContainerAppTests
 
             if (logs.Any(log => log.Contains(expectedLog)))
             {
-                Console.WriteLine($"Application Insights logs found after {stopwatch.Elapsed.TotalSeconds:F1} seconds");
                 return logs;
             }
 
-            if (stopwatch.Elapsed < timeout)
-            {
-                Console.WriteLine($"Logs not ready yet. Waiting {pollingInterval.TotalSeconds} more seconds... (elapsed: {stopwatch.Elapsed.TotalSeconds:F1}s)");
-                await Task.Delay(pollingInterval);
-            }
+            await Task.Delay(pollingInterval, time);
         }
 
         return logs;
@@ -183,9 +180,9 @@ public class ContainerAppTests
             $"Resource group '{containerAppName}' should exist after successful deployment");
     }
 
-    private static async Task AssertContainerAppRespondsWithExpectedContent(AzureContainerApp containerApp)
+    private static async Task AssertContainerAppRespondsWithExpectedContent(TestExecutionContext context, AzureContainerApp containerApp)
     {
-        using var client = new HttpClient { BaseAddress = new Uri(containerApp.Url) };
+        using var client = context.HttpClientFor(containerApp.Url);
         var response = await client.GetAsync("/");
         
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
@@ -271,10 +268,11 @@ public class ContainerAppTests
     }
 
     private static async Task AssertEnvironmentVariablesAreAccessible(
+        TestExecutionContext context,
         AzureContainerApp containerApp, 
         Dictionary<string, string> envVars)
     {
-        using var client = new HttpClient { BaseAddress = new Uri(containerApp.Url) };
+        using var client = context.HttpClientFor(containerApp.Url);
         
         foreach (var (key, expectedValue) in envVars)
         {

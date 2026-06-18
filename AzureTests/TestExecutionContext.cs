@@ -3,6 +3,7 @@ using AzureIntegration;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace AzureTests;
 
@@ -11,6 +12,8 @@ public abstract class TestExecutionContext : IAsyncDisposable
     public abstract AzureCloud Azure();
 
     public abstract HttpClient HttpClientFor(string url);
+
+    public abstract TimeProvider Time { get; }
 
     public TestExecutionContext Started() => this;
 
@@ -31,6 +34,9 @@ public class FakeExecutionContext : TestExecutionContext
     private readonly FakeArmClient _arm = new();
     private readonly WebApplicationFactory<Program> _projectDependenciesApp = new();
     private readonly WebApplicationFactory<DockerBuildArgsApp.AppMarker> _dockerBuildArgsApp = new();
+    private readonly WebApplicationFactory<ContainerApp.AppMarker> _containerApp = new();
+
+    public override TimeProvider Time { get; } = new InstantTimeProvider();
 
     public FakeExecutionContext()
     {
@@ -55,12 +61,22 @@ public class FakeExecutionContext : TestExecutionContext
             case "App":
                 return _projectDependenciesApp.Server.CreateHandler();
             case "TestContainerAppWithDockerBuildArgs":
-                return _dockerBuildArgsApp.WithWebHostBuilder(builder =>
-                    builder.UseConfiguration(ConfigurationFrom(app.EnvironmentVariables))).Server.CreateHandler();
+                return Hosted(_dockerBuildArgsApp, app);
+            case "TestContainerApp":
+                return Hosted(_containerApp, app);
             default:
                 return new FakeAppHandler(_arm);
         }
     }
+
+    private static HttpMessageHandler Hosted<TEntryPoint>(WebApplicationFactory<TEntryPoint> app, FakeWebApp deployedApp)
+        where TEntryPoint : class =>
+        app.WithWebHostBuilder(builder =>
+        {
+            builder.UseConfiguration(ConfigurationFrom(deployedApp.EnvironmentVariables));
+            builder.UseSetting("APPLICATIONINSIGHTS_CONNECTION_STRING", "InstrumentationKey=00000000-0000-0000-0000-000000000000");
+            builder.ConfigureLogging(logging => logging.AddProvider(new CapturingLoggerProvider(deployedApp.Logs)));
+        }).Server.CreateHandler();
 
     private static IConfiguration ConfigurationFrom(Dictionary<string, string> environmentVariables) =>
         new ConfigurationBuilder()
@@ -72,12 +88,15 @@ public class FakeExecutionContext : TestExecutionContext
     {
         _projectDependenciesApp.Dispose();
         _dockerBuildArgsApp.Dispose();
+        _containerApp.Dispose();
         return ValueTask.CompletedTask;
     }
 }
 
 public class RealExecutionContext : TestExecutionContext
 {
+    public override TimeProvider Time => TimeProvider.System;
+
     public override AzureCloud Azure() =>
         new(location: AzureLocation.EastUS);
 
