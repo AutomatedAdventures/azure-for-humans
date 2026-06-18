@@ -25,10 +25,11 @@ public class ContainerRegistryTests
             "A freshly created registry with no images pushed should not report that it contains an image.");
     }
 
-    [Test, Category("LongRunning")]
-    public async Task ContainsImage_AfterImageIsPushed_ReturnsTrue()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task ContainsImage_AfterImageIsPushed_ReturnsTrue(TestExecutionContext context)
     {
-        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string registryName = GenerateRegistryName();
         string imageName = "the-simplest-image";
 
