@@ -283,7 +283,7 @@ public class AzureCloud
         }
     }
 
-    private async Task<ContainerRegistryResource> CreateContainerRegistry(ResourceGroup resourceGroup, string name)
+    private async Task<IContainerRegistryResource> CreateContainerRegistry(ResourceGroup resourceGroup, string name)
     {
         string acrName = SanitizeAcrName(name);
         DeploymentLogger.Log($"Creating Container Registry '{acrName}'...");
@@ -292,14 +292,14 @@ public class AzureCloud
         {
             IsAdminUserEnabled = true
         };
-        var acr = await resourceGroup.Resource.GetContainerRegistries()
+        var acr = await resourceGroup.SeamResource!.GetContainerRegistries()
             .CreateOrUpdateAsync(WaitUntil.Completed, acrName, acrData);
-        
-        DeploymentLogger.Log($"Container Registry created: {acr.Value.Data.LoginServer}");
-        return acr.Value;
+
+        DeploymentLogger.Log($"Container Registry created: {acr.LoginServer}");
+        return acr;
     }
 
-    private async Task<ContainerRegistryResource> ResolveContainerRegistry(
+    private async Task<IContainerRegistryResource> ResolveContainerRegistry(
         ResourceGroup resourceGroup,
         string name,
         string? containerRegistryResourceId)
@@ -310,10 +310,9 @@ public class AzureCloud
         }
 
         DeploymentLogger.Log($"Using existing Container Registry '{containerRegistryResourceId}'...");
-        var existingRegistry = _armClient.GetContainerRegistryResource(new ResourceIdentifier(containerRegistryResourceId));
-        var existingRegistryResponse = await existingRegistry.GetAsync();
-        DeploymentLogger.Log($"Using existing Container Registry server: {existingRegistryResponse.Value.Data.LoginServer}");
-        return existingRegistryResponse.Value;
+        var existingRegistry = _arm.GetContainerRegistryResource(new ResourceIdentifier(containerRegistryResourceId));
+        DeploymentLogger.Log($"Using existing Container Registry server: {existingRegistry.LoginServer}");
+        return existingRegistry;
     }
 
     private static string SanitizeAcrName(string name)
@@ -322,18 +321,16 @@ public class AzureCloud
         return acrName.Length > 50 ? acrName[..50] : acrName;
     }
 
-    private static async Task<string> BuildAndPushImage(DirectoryInfo projectDir, DirectoryInfo buildContext, ContainerRegistryResource acr, string name, Dictionary<string, string>? dockerBuildArguments)
+    private async Task<string> BuildAndPushImage(DirectoryInfo projectDir, DirectoryInfo buildContext, IContainerRegistryResource acr, string name, Dictionary<string, string>? dockerBuildArguments)
     {
         var credentials = await acr.GetCredentialsAsync();
-        string loginServer = acr.Data.LoginServer;
-        string username = credentials.Value.Username;
-        string password = credentials.Value.Passwords.First().Value;
+        string loginServer = acr.LoginServer;
 
-        await BuildAndPushDockerImage(projectDir, buildContext, loginServer, username, password, name.ToLower(), dockerBuildArguments);
+        await BuildAndPushDockerImage(projectDir, buildContext, loginServer, credentials.Username, credentials.Password, name.ToLower(), dockerBuildArguments);
         return $"{loginServer}/{name.ToLower()}:latest";
     }
 
-    private static async Task BuildAndPushDockerImage(
+    private async Task BuildAndPushDockerImage(
         DirectoryInfo projectDir,
         DirectoryInfo buildContext,
         string acrLoginServer,
@@ -342,129 +339,14 @@ public class AzureCloud
         string imageName,
         Dictionary<string, string>? dockerBuildArguments)
     {
-        await VerifyDockerAvailable();
-        await DockerLogin(acrLoginServer, acrUsername, acrPassword);
+        await _docker.Verify();
+        await _docker.Login(acrLoginServer, acrUsername, acrPassword);
 
         string imageTag = $"{acrLoginServer}/{imageName}:latest";
         string dockerfilePath = Path.GetRelativePath(buildContext.FullName, Path.Combine(projectDir.FullName, "Dockerfile"))
             .Replace('\\', '/');
-        await DockerBuild(buildContext, imageTag, dockerfilePath, dockerBuildArguments);
-        await DockerPush(imageTag);
-    }
-
-    private static async Task VerifyDockerAvailable()
-    {
-        DeploymentLogger.Log("Verifying Docker availability...");
-        var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = "version --format '{{.Server.Os}}'",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-        process.Start();
-        string output = await process.StandardOutput.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        
-        if (process.ExitCode != 0)
-        {
-            string error = await process.StandardError.ReadToEndAsync();
-            throw new Exception($"Docker is not available or not running: {error}");
-        }
-        DeploymentLogger.Log($"Docker available (OS: {output.Trim()})");
-    }
-
-    private static async Task DockerLogin(string server, string username, string password)
-    {
-        DeploymentLogger.Log($"Logging into ACR {server}...");
-        var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = $"login {server} -u {username} -p {password}",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-        process.Start();
-        string error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        
-        if (process.ExitCode != 0)
-        {
-            throw new Exception($"Docker login failed: {error}");
-        }
-        DeploymentLogger.Log("Docker login successful");
-    }
-
-    private static async Task DockerBuild(DirectoryInfo buildContext, string imageTag, string dockerfilePath, Dictionary<string, string>? dockerBuildArguments)
-    {
-        DeploymentLogger.Log($"Building Docker image {imageTag}...");
-        string buildArgsString = dockerBuildArguments is { Count: > 0 }
-            ? string.Join(" ", dockerBuildArguments.Select(a => $"--build-arg {a.Key}={a.Value}"))
-            : string.Empty;
-        var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = $"build --platform linux/amd64 -t {imageTag} -f {dockerfilePath} {buildArgsString} .",
-                WorkingDirectory = buildContext.FullName,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-        process.Start();
-        
-        var errorTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        string error = await errorTask;
-        
-        if (process.ExitCode != 0)
-        {
-            DeploymentLogger.LogError($"Docker build failed: {error}");
-            throw new Exception($"Docker build failed with exit code {process.ExitCode}: {error}");
-        }
-        DeploymentLogger.Log("Docker build completed");
-    }
-
-    private static async Task DockerPush(string imageTag)
-    {
-        DeploymentLogger.Log("Pushing Docker image...");
-        var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = $"push {imageTag}",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-        process.Start();
-        
-        var errorTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        string error = await errorTask;
-        
-        if (process.ExitCode != 0)
-        {
-            DeploymentLogger.LogError($"Docker push failed: {error}");
-            throw new Exception($"Docker push failed with exit code {process.ExitCode}: {error}");
-        }
-        DeploymentLogger.Log("Docker image pushed successfully");
+        await _docker.Build(buildContext, imageTag, dockerfilePath, dockerBuildArguments);
+        await _docker.Push(imageTag);
     }
 
     private static ContainerAppContainer BuildContainer(
@@ -517,7 +399,7 @@ public class AzureCloud
     private async Task<AzureContainerApp> CreateContainerApp(
         ResourceGroup resourceGroup,
         ContainerAppManagedEnvironmentResource environment,
-        ContainerRegistryResource acr,
+        IContainerRegistryResource acr,
         string name,
         string imageName,
         Dictionary<string, string>? environmentVariables,
@@ -551,8 +433,8 @@ public class AzureCloud
                 {
                     new ContainerAppRegistryCredentials
                     {
-                        Server = acr.Data.LoginServer,
-                        Username = credentials.Value.Username,
+                        Server = acr.LoginServer,
+                        Username = credentials.Username,
                         PasswordSecretRef = "acr-password"
                     }
                 },
@@ -561,7 +443,7 @@ public class AzureCloud
                     new ContainerAppWritableSecret 
                     { 
                         Name = "acr-password", 
-                        Value = credentials.Value.Passwords.First().Value 
+                        Value = credentials.Password 
                     }
                 }
             },

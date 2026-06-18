@@ -10,6 +10,26 @@ public class FakeDocker(FakeArmClient arm) : IDocker
 
     public Task Tag(string sourceImage, string targetImage) => Task.CompletedTask;
 
+    public Task Verify() => Task.CompletedTask;
+
+    public Task Build(DirectoryInfo buildContext, string imageTag, string dockerfilePath, Dictionary<string, string>? buildArguments)
+    {
+        string baseImage = ReadBaseImage(Path.Combine(buildContext.FullName, dockerfilePath));
+        if (!baseImage.StartsWith("mcr.microsoft.com/", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new Exception($"Docker build failed: base image '{baseImage}' could not be pulled.");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static string ReadBaseImage(string dockerfilePath)
+    {
+        string fromLine = File.ReadLines(dockerfilePath)
+            .First(line => line.TrimStart().StartsWith("FROM ", StringComparison.OrdinalIgnoreCase));
+        return fromLine.Trim()["FROM ".Length..].Trim().Split(' ')[0];
+    }
+
     public Task Push(string image)
     {
         var (loginServer, repository) = Split(image);

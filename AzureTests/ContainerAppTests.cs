@@ -9,10 +9,11 @@ public class ContainerAppTests
     private static string GenerateContainerAppName() =>
         $"testcontainerapp-{Guid.NewGuid().ToString("N")[..8]}";
 
-    [Test, Category("RealAzure")]
-    public async Task DeployContainerApp_WhenDeploymentFails_CleansUpResources()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp_WhenDeploymentFails_CleansUpResources(TestExecutionContext context)
     {
-        var azure = new AzureCloud();
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string containerAppName = GenerateContainerAppName();
 
         Assert.ThrowsAsync<Exception>(async () =>

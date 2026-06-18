@@ -9,6 +9,8 @@ public interface IDocker
     Task Tag(string sourceImage, string targetImage);
     Task Push(string image);
     Task<bool> ManifestExists(string image);
+    Task Verify();
+    Task Build(DirectoryInfo buildContext, string imageTag, string dockerfilePath, Dictionary<string, string>? buildArguments);
 }
 
 internal class ProcessDocker : IDocker
@@ -21,6 +23,29 @@ internal class ProcessDocker : IDocker
     public Task Tag(string sourceImage, string targetImage) => Run($"tag {sourceImage} {targetImage}");
 
     public Task Push(string image) => Run($"push {image}");
+
+    public async Task Verify()
+    {
+        var (exitCode, error) = await Execute("version --format '{{.Server.Os}}'");
+        if (exitCode != 0)
+        {
+            throw new Exception($"Docker is not available or not running: {error}");
+        }
+    }
+
+    public async Task Build(DirectoryInfo buildContext, string imageTag, string dockerfilePath, Dictionary<string, string>? buildArguments)
+    {
+        string buildArgsString = buildArguments is { Count: > 0 }
+            ? string.Join(" ", buildArguments.Select(a => $"--build-arg {a.Key}={a.Value}"))
+            : string.Empty;
+        var (exitCode, error) = await Execute(
+            $"build --platform linux/amd64 -t {imageTag} -f {dockerfilePath} {buildArgsString} .",
+            buildContext.FullName);
+        if (exitCode != 0)
+        {
+            throw new Exception($"Docker build failed with exit code {exitCode}: {error}");
+        }
+    }
 
     public async Task<bool> ManifestExists(string image)
     {
@@ -47,7 +72,7 @@ internal class ProcessDocker : IDocker
         }
     }
 
-    private static async Task<(int exitCode, string error)> Execute(string arguments)
+    private static async Task<(int exitCode, string error)> Execute(string arguments, string? workingDirectory = null)
     {
         var process = new Process
         {
@@ -55,12 +80,12 @@ internal class ProcessDocker : IDocker
             {
                 FileName = "docker",
                 Arguments = arguments,
+                WorkingDirectory = workingDirectory ?? string.Empty,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             }
         };
-
         process.Start();
         string error = await process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
