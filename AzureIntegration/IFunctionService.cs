@@ -8,6 +8,7 @@ namespace AzureIntegration;
 public interface IApplicationLogs
 {
     IEnumerable<string> GetLogs();
+    IEnumerable<string> GetLogs(string kqlQuery);
 }
 
 public record FunctionDeployment(string Host, IApplicationLogs Logs);

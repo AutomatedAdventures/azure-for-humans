@@ -40,9 +40,28 @@ public class FakeFunctionService(FakeArmClient arm) : IFunctionService
     }
 }
 
+public class FakeContainerAppService(FakeArmClient arm) : IContainerAppService
+{
+    public Task<ContainerAppDeployment> Deploy(
+        ResourceGroup resourceGroup,
+        string name,
+        string imageName,
+        IContainerRegistryResource acr,
+        Dictionary<string, string>? environmentVariables,
+        string? managedIdentityResourceId)
+    {
+        string fqdn = $"{name.ToLower()}.fake.azurecontainerapps.io";
+        var app = arm.RecordWebApp(fqdn, imageName.Split('/').Last().Split(':').First(), environmentVariables);
+        return Task.FromResult(new ContainerAppDeployment(fqdn, new FakeApplicationLogs(app)));
+    }
+}
+
 internal class FakeApplicationLogs(FakeWebApp app) : IApplicationLogs
 {
     public IEnumerable<string> GetLogs() => app.Logs;
+
+    public IEnumerable<string> GetLogs(string kqlQuery) =>
+        app.Logs.Select(log => $"custom-kql:{log}");
 }
 
 public class FakeAppHandler(FakeArmClient arm) : HttpMessageHandler

@@ -25,7 +25,7 @@ public class FakeExecutionContext : TestExecutionContext
     private readonly FakeArmClient _arm = new();
 
     public override AzureCloud Azure() =>
-        new(_arm, new FakeAppService(_arm), new FakeFunctionService(_arm), new FakeDocker(_arm), new[] { AzureLocation.WestEurope });
+        new(_arm, new FakeAppService(_arm), new FakeFunctionService(_arm), new FakeContainerAppService(_arm), new FakeDocker(_arm), new[] { AzureLocation.WestEurope });
 
     public override HttpClient HttpClientFor(string url) =>
         new(new FakeAppHandler(_arm)) { BaseAddress = new Uri($"https://{url}") };

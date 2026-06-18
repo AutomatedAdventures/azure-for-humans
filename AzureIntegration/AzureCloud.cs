@@ -27,6 +27,7 @@ public class AzureCloud
     private readonly IDocker _docker;
     private readonly IAppService _appService;
     private readonly IFunctionService _functionService;
+    private readonly IContainerAppService _containerAppService;
     private readonly IReadOnlyList<AzureLocation> _locations;
     private SubscriptionResource _subscription;
     public AzureLocation Location { get; }
@@ -57,20 +58,26 @@ public class AzureCloud
     }
 
     public AzureCloud(IArmClient armClient, IDocker docker, IEnumerable<AzureLocation> locations)
-        : this(armClient, new FailingAppService(), new FailingFunctionService(), docker, locations)
+        : this(armClient, new FailingAppService(), new FailingFunctionService(), new FailingContainerAppService(), docker, locations)
     {
     }
 
     public AzureCloud(IArmClient armClient, IAppService appService, IDocker docker, IEnumerable<AzureLocation> locations)
-        : this(armClient, appService, new FailingFunctionService(), docker, locations)
+        : this(armClient, appService, new FailingFunctionService(), new FailingContainerAppService(), docker, locations)
     {
     }
 
     public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IDocker docker, IEnumerable<AzureLocation> locations)
+        : this(armClient, appService, functionService, new FailingContainerAppService(), docker, locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IContainerAppService containerAppService, IDocker docker, IEnumerable<AzureLocation> locations)
     {
         _arm = armClient;
         _appService = appService;
         _functionService = functionService;
+        _containerAppService = containerAppService;
         _docker = docker;
         var configuredLocations = locations.ToArray();
         Location = configuredLocations.First();
@@ -88,6 +95,7 @@ public class AzureCloud
         _docker = new ProcessDocker();
         _appService = new RealAppService(_azureCredentials);
         _functionService = new RealFunctionService(_azureCredentials);
+        _containerAppService = new RealContainerAppService();
         _subscription = null!;
         Location = location ?? AzureLocation.WestEurope;
         _locations = new[] { Location };
@@ -222,12 +230,10 @@ public class AzureCloud
 
             string imageName = await BuildAndPushImage(projectDir, buildContext, acr, name, dockerBuildArguments);
 
-            var applicationInsights = await resourceGroup.CreateApplicationInsights(name);
-            var environment = await CreateContainerAppsEnvironment(resourceGroup, name);
-            var containerApp = await CreateContainerApp(resourceGroup, environment, acr, name, imageName, environmentVariables, applicationInsights, managedIdentityResourceId);
+            var deployment = await _containerAppService.Deploy(resourceGroup, name, imageName, acr, environmentVariables, managedIdentityResourceId);
 
-            DeploymentLogger.Log($"Deployment complete: {containerApp.Url}");
-            return containerApp;
+            DeploymentLogger.Log($"Deployment complete: https://{deployment.Fqdn}");
+            return new AzureContainerApp(name, deployment.Fqdn, resourceGroup.Name, this, deployment.Logs);
         }
         catch (Exception ex)
         {
@@ -302,172 +308,6 @@ public class AzureCloud
         await _docker.Build(buildContext, imageTag, dockerfilePath, dockerBuildArguments);
         await _docker.Push(imageTag);
     }
-
-    private static ContainerAppContainer BuildContainer(
-        string name, 
-        string imageName, 
-        Dictionary<string, string>? environmentVariables)
-    {
-        var container = new ContainerAppContainer
-        {
-            Name = name.ToLower(),
-            Image = imageName,
-            Resources = new AppContainerResources { Cpu = 0.5, Memory = "1Gi" }
-        };
-
-        container.Env.Add(new ContainerAppEnvironmentVariable 
-        { 
-            Name = "DEPLOYMENT_DATE", 
-            Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") 
-        });
-        container.Env.Add(new ContainerAppEnvironmentVariable 
-        { 
-            Name = "ASPNETCORE_URLS", 
-            Value = "http://+:8080" 
-        });
-
-        if (environmentVariables != null)
-        {
-            foreach (var kvp in environmentVariables)
-            {
-                container.Env.Add(new ContainerAppEnvironmentVariable { Name = kvp.Key, Value = kvp.Value });
-            }
-        }
-
-        return container;
-    }
-
-    private async Task<ContainerAppManagedEnvironmentResource> CreateContainerAppsEnvironment(ResourceGroup resourceGroup, string name)
-    {
-        string environmentName = $"{name}-env";
-        DeploymentLogger.Log($"Creating Container Apps Environment '{environmentName}'...");
-        
-        var environmentData = new ContainerAppManagedEnvironmentData(Location);
-        var environment = await resourceGroup.Resource.GetContainerAppManagedEnvironments()
-            .CreateOrUpdateAsync(WaitUntil.Completed, environmentName, environmentData);
-
-        DeploymentLogger.Log("Container Apps Environment created");
-        return environment.Value;
-    }
-
-    private async Task<AzureContainerApp> CreateContainerApp(
-        ResourceGroup resourceGroup,
-        ContainerAppManagedEnvironmentResource environment,
-        IContainerRegistryResource acr,
-        string name,
-        string imageName,
-        Dictionary<string, string>? environmentVariables,
-        ApplicationInsights applicationInsights,
-        string? managedIdentityResourceId = null)
-    {
-        DeploymentLogger.Log($"Creating Container App '{name}'...");
-
-        var credentials = await acr.GetCredentialsAsync();
-        var appiEnvVars = new Dictionary<string, string>
-        {
-            { "APPLICATIONINSIGHTS_CONNECTION_STRING", applicationInsights.ConnectionString }
-        };
-        var mergedEnvVars = environmentVariables == null
-            ? appiEnvVars
-            : appiEnvVars.Concat(environmentVariables).ToDictionary(k => k.Key, v => v.Value);
-        var container = BuildContainer(name, imageName, mergedEnvVars);
-        
-        var containerAppData = new ContainerAppData(Location)
-        {
-            ManagedEnvironmentId = environment.Id,
-            Configuration = new ContainerAppConfiguration
-            {
-                Ingress = new ContainerAppIngressConfiguration
-                {
-                    External = true,
-                    TargetPort = 8080,
-                    Transport = ContainerAppIngressTransportMethod.Auto
-                },
-                Registries =
-                {
-                    new ContainerAppRegistryCredentials
-                    {
-                        Server = acr.LoginServer,
-                        Username = credentials.Username,
-                        PasswordSecretRef = "acr-password"
-                    }
-                },
-                Secrets =
-                {
-                    new ContainerAppWritableSecret 
-                    { 
-                        Name = "acr-password", 
-                        Value = credentials.Password 
-                    }
-                }
-            },
-            Template = new ContainerAppTemplate
-            {
-                Containers = { container },
-                Scale = new ContainerAppScale { MinReplicas = 1, MaxReplicas = 1 }
-            }
-        };
-
-        if (managedIdentityResourceId != null)
-        {
-            containerAppData.Identity = new Azure.ResourceManager.Models.ManagedServiceIdentity(
-                Azure.ResourceManager.Models.ManagedServiceIdentityType.UserAssigned);
-            containerAppData.Identity.UserAssignedIdentities.Add(
-                new ResourceIdentifier(managedIdentityResourceId),
-                new Azure.ResourceManager.Models.UserAssignedIdentity());
-        }
-
-        var containerApp = await resourceGroup.Resource.GetContainerApps()
-            .CreateOrUpdateAsync(WaitUntil.Completed, name, containerAppData);
-
-        string fqdn = containerApp.Value.Data.Configuration.Ingress.Fqdn;
-        DeploymentLogger.Log("Container App created, waiting for readiness...");
-        
-        await WaitForContainerAppToBeReady(fqdn);
-
-        return new AzureContainerApp(containerApp.Value.Data.Name, fqdn, resourceGroup.Resource.Data.Name, this, applicationInsights);
-    }
-
-    private static async Task WaitForContainerAppToBeReady(string fqdn, int timeoutMinutes = 10, int intervalSeconds = 30)
-    {
-        string appUrl = $"https://{fqdn}";
-        var timeout = TimeSpan.FromMinutes(timeoutMinutes);
-        var interval = TimeSpan.FromSeconds(intervalSeconds);
-        var stopwatch = Stopwatch.StartNew();
-
-        DeploymentLogger.Log($"Waiting for Container App at {appUrl}...");
-
-        using var httpClient = new HttpClient();
-        httpClient.Timeout = TimeSpan.FromSeconds(30);
-
-        while (stopwatch.Elapsed < timeout)
-        {
-            try
-            {
-                var response = await httpClient.GetAsync(appUrl);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    DeploymentLogger.Log($"Container App ready (Status: {response.StatusCode})");
-                    return;
-                }
-
-                DeploymentLogger.Log($"Not ready yet (Status: {response.StatusCode})");
-            }
-            catch (Exception ex)
-            {
-                DeploymentLogger.Log($"Not ready yet ({ex.Message})");
-            }
-
-            if (stopwatch.Elapsed + interval < timeout)
-            {
-                await Task.Delay(interval);
-            }
-        }
-
-        throw new TimeoutException($"Container App at {appUrl} did not become ready within {timeoutMinutes} minutes");
-    }
-
 
     internal static async Task DeployZipFile(TokenCredential credentials, string zipFilePath, string serviceName)
     {

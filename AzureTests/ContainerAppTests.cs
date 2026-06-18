@@ -223,10 +223,11 @@ public class ContainerAppTests
         Assert.That(retrievedSecret.Trim('"'), Is.EqualTo(secretValue));
     }
 
-    [Test, Category("RealAzure")]
-    public async Task DeployContainerApp_UsesTheProvidedContainerRegistry()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp_UsesTheProvidedContainerRegistry(TestExecutionContext context)
     {
-        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string containerAppName = GenerateContainerAppName();
 
         await using var providedRegistry = await azure.CreateContainerRegistry(
@@ -243,10 +244,11 @@ public class ContainerAppTests
             "Expected the provided container registry to host the deployed image, but the deployment used a different registry.");
     }
 
-    [Test, Category("RealAzure")]
-    public async Task DisposingContainerApp_DoesNotRemoveTheProvidedContainerRegistry()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DisposingContainerApp_DoesNotRemoveTheProvidedContainerRegistry(TestExecutionContext context)
     {
-        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string containerAppName = GenerateContainerAppName();
         string registryResourceGroupName = $"{containerAppName}-registry";
 
