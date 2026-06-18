@@ -8,7 +8,7 @@ public class AppServiceTests
     private static string GenerateAppServiceName() =>
         $"testappservice-{Guid.NewGuid().ToString("N")[..8]}";
 
-    [Test]
+    [Test, Category("LongRunning")]
     public async Task DeployAppService_WhenDeploymentFails_CleansUpResources()
     {
         var azure = new AzureCloud();
@@ -27,7 +27,7 @@ public class AppServiceTests
             $"Resource group '{appServiceName}' should have been cleaned up after deployment failure");
     }
 
-    [Test]
+    [Test, Category("LongRunning")]
     public async Task DeployAppService()
     {
         var azure = new AzureCloud();
@@ -41,7 +41,7 @@ public class AppServiceTests
         Assert.That(content, Is.EqualTo("TestAppService deployment successful!"));
     }
 
-    [Test]
+    [Test, Category("LongRunning")]
     public async Task DeployAppService_WithEnvironmentVariables()
     {
         var azure = new AzureCloud();

@@ -16,7 +16,7 @@ public class AuthenticationTests
         });
     }
 
-    [Test]
+    [Test, Category("LongRunning")]
     public void PassUserTokenCredentials()
     {
         var azure = new AzureCloud(new DefaultAzureCredential());

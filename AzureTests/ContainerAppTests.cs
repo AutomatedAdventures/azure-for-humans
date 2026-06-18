@@ -9,7 +9,7 @@ public class ContainerAppTests
     private static string GenerateContainerAppName() =>
         $"testcontainerapp-{Guid.NewGuid().ToString("N")[..8]}";
 
-    [Test]
+    [Test, Category("LongRunning")]
     public async Task DeployContainerApp_WhenDeploymentFails_CleansUpResources()
     {
         var azure = new AzureCloud();
@@ -91,7 +91,7 @@ public class ContainerAppTests
         Assert.That(value.Trim('"'), Is.EqualTo("hello-from-build-arg"));
     }
 
-    [Test]
+    [Test, Category("LongRunning")]
     public async Task DeployContainerApp()
     {
         var azure = new AzureCloud(location: AzureLocation.EastUS);

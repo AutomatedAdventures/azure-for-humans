@@ -4,7 +4,7 @@ namespace AzureTests;
 
 public class ResourceGroupTests
 {
-    [Test]
+    [Test, Category("LongRunning")]
     public void GetExistingResourceGroups()
     {
         var azure = new AzureCloud();
@@ -12,7 +12,7 @@ public class ResourceGroupTests
         Assert.That(resourceGroups.Count, Is.GreaterThan(0));
     }
 
-    [Test]
+    [Test, Category("LongRunning")]
     public async Task CreateAndDeleteResourceGroup()
     {
         var azure = new AzureCloud();
@@ -24,7 +24,7 @@ public class ResourceGroupTests
         Assert.That(resorceGroups.All(x => x.Name != "testResourceGroup1"));
     }
 
-    [Test]
+    [Test, Category("LongRunning")]
     public async Task ResourceGroupExists_ReturnsTrueForExistingGroup()
     {
         var azure = new AzureCloud();
@@ -41,7 +41,7 @@ public class ResourceGroupTests
         Assert.That(exists, Is.False);
     }
 
-    [Test]
+    [Test, Category("LongRunning")]
     public async Task ResourceGroupExists_ReturnsFalseForNonExistingGroup()
     {
         var azure = new AzureCloud();

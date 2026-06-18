@@ -8,7 +8,7 @@ public class AzureFunctionTests
     private static string GenerateFunctionName() =>
         $"testfunction-{Guid.NewGuid().ToString("N")[..8]}";
 
-    [Test]
+    [Test, Category("LongRunning")]
     public async Task DeployAzureFunction_WhenDeploymentFails_CleansUpResources()
     {
         var azure = new AzureCloud();
@@ -27,7 +27,7 @@ public class AzureFunctionTests
             $"Resource group '{functionName}' should have been cleaned up after deployment failure");
     }
 
-    [Test]
+    [Test, Category("LongRunning")]
     public async Task DeployAzureFunction()
     {
         var azure = new AzureCloud();
@@ -41,7 +41,7 @@ public class AzureFunctionTests
         await AssertLogsAppearInApplicationInsights(function);
     }
 
-    [Test]
+    [Test, Category("LongRunning")]
     public async Task DeployAzureFunction_WithEnvironmentVariables()
     {
         var azure = new AzureCloud();
