@@ -827,11 +827,11 @@ public class AzureCloud
 
     public async Task<IEnumerable<ResourceGroup>> GetResourceGroups()
     {
-        var subscription = await GetSubscriptionAsync();
+        var subscription = await _arm.GetDefaultSubscriptionAsync();
         var resourceGroups = new List<ResourceGroup>();
-        await foreach (var resourceGroup in subscription.GetResourceGroups().GetAllAsync())
+        foreach (var resourceGroup in await subscription.GetResourceGroups().GetAllAsync())
         {
-            resourceGroups.Add(new ResourceGroup(resourceGroup, this));
+            resourceGroups.Add(new ResourceGroup(resourceGroup.Concrete!, this) { SeamResource = resourceGroup });
         }
 
         return resourceGroups;

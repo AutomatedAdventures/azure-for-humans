@@ -16,7 +16,7 @@ public record ResourceGroup(ResourceGroupResource Resource, AzureCloud AzureClou
 
     public IResourceGroupResource? SeamResource { get; init; }
 
-    public string Name => Resource.Data.Name;
+    public string Name => SeamResource?.Name ?? Resource.Data.Name;
 
     public async Task<StorageAccount> CreateStorageAccount(string name)
     {

@@ -54,6 +54,8 @@ public class FakeArmClient : IArmClient
 
     internal bool HasResourceGroup(string name) => _resourceGroups.Contains(name);
 
+    internal IReadOnlyList<string> ResourceGroupNames => _resourceGroups.ToList();
+
     internal static RequestFailedException CapacityError(AzureLocation location) =>
         new(status: 400,
             message: $"AKS is experiencing heavy usage in region {location}.",
@@ -87,11 +89,19 @@ internal class FakeResourceGroupCollection(FakeArmClient armClient) : IResourceG
 
     public Task<bool> ExistsAsync(string name) =>
         Task.FromResult(armClient.HasResourceGroup(name));
+
+    public Task<IReadOnlyList<IResourceGroupResource>> GetAllAsync() =>
+        Task.FromResult<IReadOnlyList<IResourceGroupResource>>(
+            armClient.ResourceGroupNames
+                .Select(name => (IResourceGroupResource)new FakeResourceGroupResource(armClient, name))
+                .ToList());
 }
 
 internal class FakeResourceGroupResource(FakeArmClient armClient, string name) : IResourceGroupResource
 {
     public ResourceGroupResource? Concrete => null;
+
+    public string Name => name;
 
     public IContainerRegistryCollection GetContainerRegistries() =>
         new FakeContainerRegistryCollection(armClient);

@@ -23,11 +23,13 @@ public interface IResourceGroupCollection
     Task<IResourceGroupResource> CreateOrUpdateAsync(WaitUntil waitUntil, string name, ResourceGroupData data);
     Task<IResourceGroupResource> GetAsync(string name);
     Task<bool> ExistsAsync(string name);
+    Task<IReadOnlyList<IResourceGroupResource>> GetAllAsync();
 }
 
 public interface IResourceGroupResource
 {
     ResourceGroupResource? Concrete { get; }
+    string Name { get; }
     IContainerRegistryCollection GetContainerRegistries();
     Task DeleteAsync(WaitUntil waitUntil);
 }
@@ -82,11 +84,23 @@ internal class ResourceGroupCollectionAdapter(ResourceGroupCollection collection
 
     public async Task<bool> ExistsAsync(string name) =>
         await collection.ExistsAsync(name);
+
+    public async Task<IReadOnlyList<IResourceGroupResource>> GetAllAsync()
+    {
+        var resources = new List<IResourceGroupResource>();
+        await foreach (var resource in collection.GetAllAsync())
+        {
+            resources.Add(new ResourceGroupResourceAdapter(resource));
+        }
+        return resources;
+    }
 }
 
 internal class ResourceGroupResourceAdapter(ResourceGroupResource resource) : IResourceGroupResource
 {
     public ResourceGroupResource? Concrete => resource;
+
+    public string Name => resource.Data.Name;
 
     public IContainerRegistryCollection GetContainerRegistries() =>
         new ContainerRegistryCollectionAdapter(resource.GetContainerRegistries());

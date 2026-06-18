@@ -12,16 +12,20 @@ public class ResourceGroupTests
         Assert.That(resourceGroups.Count, Is.GreaterThan(0));
     }
 
-    [Test, Category("RealAzure")]
-    public async Task CreateAndDeleteResourceGroup()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task CreateAndDeleteResourceGroup(TestExecutionContext context)
     {
-        var azure = new AzureCloud();
-        await azure.CreateResourceGroup(name: "testResourceGroup1");
-        var resorceGroups = await azure.GetResourceGroups();
-        Assert.That(resorceGroups.Any(x => x.Name == "testResourceGroup1"));
-        await azure.DeleteResourceGroup(name: "testResourceGroup1");
-        resorceGroups = await azure.GetResourceGroups();
-        Assert.That(resorceGroups.All(x => x.Name != "testResourceGroup1"));
+        await using var _ = context.Started();
+        var azure = context.Azure();
+        string resourceGroupName = $"test-rg-{Guid.NewGuid().ToString("N")[..8]}";
+
+        await azure.CreateResourceGroup(name: resourceGroupName);
+        var resourceGroups = await azure.GetResourceGroups();
+        Assert.That(resourceGroups.Any(x => x.Name == resourceGroupName));
+
+        await azure.DeleteResourceGroup(name: resourceGroupName);
+        resourceGroups = await azure.GetResourceGroups();
+        Assert.That(resourceGroups.All(x => x.Name != resourceGroupName));
     }
 
     [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
