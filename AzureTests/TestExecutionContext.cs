@@ -29,6 +29,11 @@ public class FakeExecutionContext : TestExecutionContext
     private readonly FakeArmClient _arm = new();
     private readonly WebApplicationFactory<Program> _projectDependenciesApp = new();
 
+    public FakeExecutionContext()
+    {
+        _ = _projectDependenciesApp.Server;
+    }
+
     public override AzureCloud Azure() =>
         new(_arm, new FakeAppService(_arm), new FakeFunctionService(_arm), new FakeContainerAppService(_arm), new FakeDocker(_arm), new[] { AzureLocation.WestEurope });
 
