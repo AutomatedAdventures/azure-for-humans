@@ -1,6 +1,8 @@
 using Azure.Core;
 using AzureIntegration;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 
 namespace AzureTests;
 
@@ -33,7 +35,6 @@ public class FakeExecutionContext : TestExecutionContext
     public FakeExecutionContext()
     {
         _ = _projectDependenciesApp.Server;
-        _ = _dockerBuildArgsApp.Server;
     }
 
     public override AzureCloud Azure() =>
@@ -54,20 +55,18 @@ public class FakeExecutionContext : TestExecutionContext
             case "App":
                 return _projectDependenciesApp.Server.CreateHandler();
             case "TestContainerAppWithDockerBuildArgs":
-                PublishEnvironmentVariables(app);
-                return _dockerBuildArgsApp.Server.CreateHandler();
+                return _dockerBuildArgsApp.WithWebHostBuilder(builder =>
+                    builder.UseConfiguration(ConfigurationFrom(app.EnvironmentVariables))).Server.CreateHandler();
             default:
                 return new FakeAppHandler(_arm);
         }
     }
 
-    private static void PublishEnvironmentVariables(FakeWebApp app)
-    {
-        foreach (var variable in app.EnvironmentVariables)
-        {
-            Environment.SetEnvironmentVariable(variable.Key, variable.Value);
-        }
-    }
+    private static IConfiguration ConfigurationFrom(Dictionary<string, string> environmentVariables) =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(environmentVariables.Select(variable =>
+                new KeyValuePair<string, string?>(variable.Key, variable.Value)))
+            .Build();
 
     public override ValueTask DisposeAsync()
     {
