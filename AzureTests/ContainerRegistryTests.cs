@@ -61,10 +61,11 @@ public class ContainerRegistryTests
             "A registry that was just created should report that it exists.");
     }
 
-    [Test, Category("RealAzure")]
-    public async Task Exists_AfterRegistryWasDeleted_ReturnsFalse()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task Exists_AfterRegistryWasDeleted_ReturnsFalse(TestExecutionContext context)
     {
-        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string registryName = GenerateRegistryName();
 
         var registry = await azure.CreateContainerRegistry(

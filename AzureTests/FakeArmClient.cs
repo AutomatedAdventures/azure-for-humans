@@ -44,6 +44,9 @@ public class FakeArmClient : IArmClient
     internal FakeRegistry? RegistryAt(string loginServer) =>
         _registries.TryGetValue(loginServer, out var registry) ? registry : null;
 
+    internal void DeleteRegistry(string name) =>
+        _registries.Remove($"{name.ToLower()}.azurecr.io");
+
     internal static RequestFailedException CapacityError(AzureLocation location) =>
         new(status: 400,
             message: $"AKS is experiencing heavy usage in region {location}.",
@@ -68,21 +71,25 @@ internal class FakeResourceGroupCollection(FakeArmClient armClient) : IResourceG
         }
 
         armClient.RecordResourceGroupCreatedIn(region);
-        return Task.FromResult<IResourceGroupResource>(new FakeResourceGroupResource(armClient));
+        return Task.FromResult<IResourceGroupResource>(new FakeResourceGroupResource(armClient, name));
     }
 
     public Task<IResourceGroupResource> GetAsync(string name) =>
-        Task.FromResult<IResourceGroupResource>(new FakeResourceGroupResource(armClient));
+        Task.FromResult<IResourceGroupResource>(new FakeResourceGroupResource(armClient, name));
 }
 
-internal class FakeResourceGroupResource(FakeArmClient armClient) : IResourceGroupResource
+internal class FakeResourceGroupResource(FakeArmClient armClient, string name) : IResourceGroupResource
 {
     public ResourceGroupResource? Concrete => null;
 
     public IContainerRegistryCollection GetContainerRegistries() =>
         new FakeContainerRegistryCollection(armClient);
 
-    public Task DeleteAsync(WaitUntil waitUntil) => Task.CompletedTask;
+    public Task DeleteAsync(WaitUntil waitUntil)
+    {
+        armClient.DeleteRegistry(name);
+        return Task.CompletedTask;
+    }
 }
 
 internal class FakeContainerRegistryCollection(FakeArmClient armClient) : IContainerRegistryCollection
