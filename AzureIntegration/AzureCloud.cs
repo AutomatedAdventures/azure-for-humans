@@ -24,9 +24,12 @@ public class AzureCloud
     private readonly TokenCredential _azureCredentials;
     private readonly ArmClient _armClient;
     private readonly IArmClient _arm;
+    private readonly IDocker _docker;
     private readonly IReadOnlyList<AzureLocation> _locations;
     private SubscriptionResource _subscription;
     public AzureLocation Location { get; }
+
+    internal IDocker Docker => _docker;
 
     // Static lock and flag for MSBuild registration to ensure thread safety
     private static readonly object MsBuildLock = new();
@@ -47,8 +50,14 @@ public class AzureCloud
     }
 
     public AzureCloud(IArmClient armClient, IEnumerable<AzureLocation> locations)
+        : this(armClient, new ProcessDocker(), locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IDocker docker, IEnumerable<AzureLocation> locations)
     {
         _arm = armClient;
+        _docker = docker;
         var configuredLocations = locations.ToArray();
         Location = configuredLocations.First();
         _locations = configuredLocations;
@@ -62,6 +71,7 @@ public class AzureCloud
         _azureCredentials = credentials;
         _armClient = new ArmClient(_azureCredentials);
         _arm = new ArmClientAdapter(_armClient);
+        _docker = new ProcessDocker();
         _subscription = null!;
         Location = location ?? AzureLocation.WestEurope;
         _locations = new[] { Location };
@@ -97,7 +107,7 @@ public class AzureCloud
             {
                 var createdResourceGroup = await subscription.GetResourceGroups()
                     .CreateOrUpdateAsync(WaitUntil.Completed, name, new ResourceGroupData(location));
-                return new ResourceGroup(createdResourceGroup.Concrete!, this);
+                return new ResourceGroup(createdResourceGroup.Concrete!, this) { SeamResource = createdResourceGroup };
             }
             catch (RequestFailedException ex) when (ex.ErrorCode == "AKSCapacityHeavyUsage")
             {
@@ -111,8 +121,8 @@ public class AzureCloud
 
     public async Task DeleteResourceGroup(string name)
     {
-        var subscription = await GetSubscriptionAsync();
-        var resourceGroup = (await subscription.GetResourceGroups().GetAsync(name)).Value;
+        var subscription = await _arm.GetDefaultSubscriptionAsync();
+        var resourceGroup = await subscription.GetResourceGroups().GetAsync(name);
         await resourceGroup.DeleteAsync(WaitUntil.Completed);
     }
 

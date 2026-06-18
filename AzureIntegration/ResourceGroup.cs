@@ -13,7 +13,9 @@ namespace AzureIntegration;
 public record ResourceGroup(ResourceGroupResource Resource, AzureCloud AzureCloud)
 {
     private const int MaxStorageAccountNameLength = 24;
-    
+
+    public IResourceGroupResource? SeamResource { get; init; }
+
     public string Name => Resource.Data.Name;
 
     public async Task<StorageAccount> CreateStorageAccount(string name)

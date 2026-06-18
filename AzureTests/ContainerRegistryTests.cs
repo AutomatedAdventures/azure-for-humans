@@ -8,10 +8,11 @@ public class ContainerRegistryTests
     private static string GenerateRegistryName() =>
         $"testregistry{Guid.NewGuid().ToString("N")[..8]}";
 
-    [Test, Category("LongRunning")]
-    public async Task ContainsImage_WhenImageWasNeverPushed_ReturnsFalse()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task ContainsImage_WhenImageWasNeverPushed_ReturnsFalse(TestExecutionContext context)
     {
-        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string registryName = GenerateRegistryName();
 
         await using var registry = await azure.CreateContainerRegistry(
@@ -40,5 +41,38 @@ public class ContainerRegistryTests
 
         Assert.That(containsImage, Is.True,
             "After pushing an image, the registry should report that it contains it.");
+    }
+
+    [Test, Category("LongRunning")]
+    public async Task Exists_WhenRegistryWasCreated_ReturnsTrue()
+    {
+        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        string registryName = GenerateRegistryName();
+
+        await using var registry = await azure.CreateContainerRegistry(
+            resourceGroupName: registryName,
+            registryName: registryName);
+
+        bool exists = await registry.Exists();
+
+        Assert.That(exists, Is.True,
+            "A registry that was just created should report that it exists.");
+    }
+
+    [Test, Category("LongRunning")]
+    public async Task Exists_AfterRegistryWasDeleted_ReturnsFalse()
+    {
+        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        string registryName = GenerateRegistryName();
+
+        var registry = await azure.CreateContainerRegistry(
+            resourceGroupName: registryName,
+            registryName: registryName);
+        await registry.DisposeAsync();
+
+        bool exists = await registry.Exists();
+
+        Assert.That(exists, Is.False,
+            "A registry whose resources were deleted should report that it no longer exists.");
     }
 }

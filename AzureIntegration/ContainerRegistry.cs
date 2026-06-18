@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Azure;
 using Azure.ResourceManager.ContainerRegistry;
 using Azure.ResourceManager.ContainerRegistry.Models;
@@ -11,7 +10,8 @@ public class ContainerRegistry(
     string username,
     string password,
     string resourceGroupName,
-    AzureCloud azureCloud) : IAsyncDisposable
+    AzureCloud azureCloud,
+    IDocker docker) : IAsyncDisposable
 {
     public string ResourceId => resourceId;
     public string LoginServer => loginServer;
@@ -27,29 +27,27 @@ public class ContainerRegistry(
     {
         DeploymentLogger.Log($"Creating container registry '{registryName}' in '{resourceGroupName}'...");
         var resourceGroup = await azureCloud.CreateResourceGroup(resourceGroupName);
-        
+
         var acrData = new ContainerRegistryData(azureCloud.Location, new ContainerRegistrySku(ContainerRegistrySkuName.Basic))
         {
             IsAdminUserEnabled = true
         };
-        
-        var acr = await resourceGroup.Resource.GetContainerRegistries()
+
+        var acr = await resourceGroup.SeamResource!.GetContainerRegistries()
             .CreateOrUpdateAsync(WaitUntil.Completed, registryName, acrData);
-        
-        var credentials = await acr.Value.GetCredentialsAsync();
-        string loginServer = acr.Value.Data.LoginServer;
-        string username = credentials.Value.Username;
-        string password = credentials.Value.Passwords.First().Value;
-        
-        DeploymentLogger.Log($"Container Registry created: {loginServer}");
-        
+
+        var credentials = await acr.GetCredentialsAsync();
+
+        DeploymentLogger.Log($"Container Registry created: {acr.LoginServer}");
+
         return new ContainerRegistry(
-            acr.Value.Id.ToString(),
-            loginServer,
-            username,
-            password,
+            acr.Id,
+            acr.LoginServer,
+            credentials.Username,
+            credentials.Password,
             resourceGroupName,
-            azureCloud);
+            azureCloud,
+            azureCloud.Docker);
     }
 
     public async Task<bool> ContainsImage(string imageName)
@@ -58,9 +56,9 @@ public class ContainerRegistry(
         {
             DeploymentLogger.Log($"Checking if registry '{LoginServer}' contains image '{imageName}'...");
 
-            await DockerLogin();
+            await docker.Login(LoginServer, Username, Password);
             string fullImageName = $"{LoginServer}/{imageName}:latest";
-            return await DockerManifestExists(fullImageName);
+            return await docker.ManifestExists(fullImageName);
         }
         catch (Exception ex)
         {
@@ -73,103 +71,14 @@ public class ContainerRegistry(
     {
         DeploymentLogger.Log($"Pushing image '{imageName}' to registry '{LoginServer}'...");
 
-        await DockerLogin();
-        await DockerPull("hello-world");
+        await docker.Login(LoginServer, Username, Password);
+        await docker.Pull("hello-world");
 
         string targetImage = $"{LoginServer}/{imageName}:latest";
-        await DockerTag("hello-world", targetImage);
-        await DockerPush(targetImage);
+        await docker.Tag("hello-world", targetImage);
+        await docker.Push(targetImage);
 
         DeploymentLogger.Log($"Image '{imageName}' pushed to registry");
-    }
-
-    private static async Task DockerPull(string image) =>
-        await RunDocker($"pull {image}");
-
-    private static async Task DockerTag(string sourceImage, string targetImage) =>
-        await RunDocker($"tag {sourceImage} {targetImage}");
-
-    private static async Task DockerPush(string image) =>
-        await RunDocker($"push {image}");
-
-    private static async Task RunDocker(string arguments)
-    {
-        var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = arguments,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-
-        process.Start();
-        string error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        if (process.ExitCode != 0)
-        {
-            throw new Exception($"Docker command 'docker {arguments}' failed: {error}");
-        }
-    }
-
-    private async Task DockerLogin()
-    {
-        var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = $"login {LoginServer} -u {Username} -p {Password}",
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-
-        process.Start();
-        string error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        if (process.ExitCode != 0)
-        {
-            throw new Exception($"Docker login failed for registry check: {error}");
-        }
-    }
-
-    private static async Task<bool> DockerManifestExists(string fullImageName)
-    {
-        var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = $"manifest inspect {fullImageName}",
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-
-        process.Start();
-        string error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        if (process.ExitCode == 0)
-        {
-            return true;
-        }
-
-        // "no such manifest" means the image is absent. Any other error is surfaced for troubleshooting.
-        if (!error.Contains("no such manifest", StringComparison.OrdinalIgnoreCase))
-        {
-            DeploymentLogger.LogError($"Docker manifest inspect failed: {error}");
-        }
-
-        return false;
     }
 
     public async ValueTask DisposeAsync()
@@ -177,3 +86,4 @@ public class ContainerRegistry(
         await azureCloud.DeleteResourceGroup(resourceGroupName);
     }
 }
+
