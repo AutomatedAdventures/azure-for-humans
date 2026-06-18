@@ -128,7 +128,7 @@ public class AzureCloud
 
     public async Task<bool> ResourceGroupExists(string name)
     {
-        var subscription = await GetSubscriptionAsync();
+        var subscription = await _arm.GetDefaultSubscriptionAsync();
         return await subscription.GetResourceGroups().ExistsAsync(name);
     }
 

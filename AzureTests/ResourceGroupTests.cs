@@ -24,10 +24,11 @@ public class ResourceGroupTests
         Assert.That(resorceGroups.All(x => x.Name != "testResourceGroup1"));
     }
 
-    [Test, Category("RealAzure")]
-    public async Task ResourceGroupExists_ReturnsTrueForExistingGroup()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task ResourceGroupExists_ReturnsTrueForExistingGroup(TestExecutionContext context)
     {
-        var azure = new AzureCloud();
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string resourceGroupName = $"test-rg-exists-{Guid.NewGuid().ToString("N")[..8]}";
 
         await azure.CreateResourceGroup(name: resourceGroupName);
@@ -41,10 +42,11 @@ public class ResourceGroupTests
         Assert.That(exists, Is.False);
     }
 
-    [Test, Category("RealAzure")]
-    public async Task ResourceGroupExists_ReturnsFalseForNonExistingGroup()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task ResourceGroupExists_ReturnsFalseForNonExistingGroup(TestExecutionContext context)
     {
-        var azure = new AzureCloud();
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string resourceGroupName = $"non-existing-rg-{Guid.NewGuid().ToString("N")[..8]}";
 
         bool exists = await azure.ResourceGroupExists(resourceGroupName);

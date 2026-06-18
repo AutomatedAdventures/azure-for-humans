@@ -10,6 +10,7 @@ public class FakeArmClient : IArmClient
 {
     private readonly HashSet<AzureLocation> _regionsWithoutCapacity = new();
     private readonly Dictionary<string, FakeRegistry> _registries = new();
+    private readonly HashSet<string> _resourceGroups = new();
 
     public AzureLocation? RegionWhereResourceGroupWasCreated { get; private set; }
 
@@ -47,6 +48,12 @@ public class FakeArmClient : IArmClient
     internal void DeleteRegistry(string name) =>
         _registries.Remove($"{name.ToLower()}.azurecr.io");
 
+    internal void RecordResourceGroup(string name) => _resourceGroups.Add(name);
+
+    internal void RemoveResourceGroup(string name) => _resourceGroups.Remove(name);
+
+    internal bool HasResourceGroup(string name) => _resourceGroups.Contains(name);
+
     internal static RequestFailedException CapacityError(AzureLocation location) =>
         new(status: 400,
             message: $"AKS is experiencing heavy usage in region {location}.",
@@ -71,11 +78,15 @@ internal class FakeResourceGroupCollection(FakeArmClient armClient) : IResourceG
         }
 
         armClient.RecordResourceGroupCreatedIn(region);
+        armClient.RecordResourceGroup(name);
         return Task.FromResult<IResourceGroupResource>(new FakeResourceGroupResource(armClient, name));
     }
 
     public Task<IResourceGroupResource> GetAsync(string name) =>
         Task.FromResult<IResourceGroupResource>(new FakeResourceGroupResource(armClient, name));
+
+    public Task<bool> ExistsAsync(string name) =>
+        Task.FromResult(armClient.HasResourceGroup(name));
 }
 
 internal class FakeResourceGroupResource(FakeArmClient armClient, string name) : IResourceGroupResource
@@ -88,6 +99,7 @@ internal class FakeResourceGroupResource(FakeArmClient armClient, string name) :
     public Task DeleteAsync(WaitUntil waitUntil)
     {
         armClient.DeleteRegistry(name);
+        armClient.RemoveResourceGroup(name);
         return Task.CompletedTask;
     }
 }

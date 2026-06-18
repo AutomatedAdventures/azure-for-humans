@@ -22,6 +22,7 @@ public interface IResourceGroupCollection
 {
     Task<IResourceGroupResource> CreateOrUpdateAsync(WaitUntil waitUntil, string name, ResourceGroupData data);
     Task<IResourceGroupResource> GetAsync(string name);
+    Task<bool> ExistsAsync(string name);
 }
 
 public interface IResourceGroupResource
@@ -78,6 +79,9 @@ internal class ResourceGroupCollectionAdapter(ResourceGroupCollection collection
         var resource = await collection.GetAsync(name);
         return new ResourceGroupResourceAdapter(resource.Value);
     }
+
+    public async Task<bool> ExistsAsync(string name) =>
+        await collection.ExistsAsync(name);
 }
 
 internal class ResourceGroupResourceAdapter(ResourceGroupResource resource) : IResourceGroupResource
