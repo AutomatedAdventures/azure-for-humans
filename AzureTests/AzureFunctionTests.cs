@@ -8,10 +8,11 @@ public class AzureFunctionTests
     private static string GenerateFunctionName() =>
         $"testfunction-{Guid.NewGuid().ToString("N")[..8]}";
 
-    [Test, Category("RealAzure")]
-    public async Task DeployAzureFunction_WhenDeploymentFails_CleansUpResources()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployAzureFunction_WhenDeploymentFails_CleansUpResources(TestExecutionContext context)
     {
-        var azure = new AzureCloud();
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string functionName = GenerateFunctionName();
 
         var exception = Assert.ThrowsAsync<InvalidOperationException>(async () =>

@@ -8,10 +8,11 @@ public class AppServiceTests
     private static string GenerateAppServiceName() =>
         $"testappservice-{Guid.NewGuid().ToString("N")[..8]}";
 
-    [Test, Category("RealAzure")]
-    public async Task DeployAppService_WhenDeploymentFails_CleansUpResources()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployAppService_WhenDeploymentFails_CleansUpResources(TestExecutionContext context)
     {
-        var azure = new AzureCloud();
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string appServiceName = GenerateAppServiceName();
 
         var exception = Assert.ThrowsAsync<InvalidOperationException>(async () =>
