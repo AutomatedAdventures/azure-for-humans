@@ -9,3 +9,8 @@ app.MapGet("/variable/{name}", (string name) =>
 });
 
 await app.RunAsync();
+
+namespace DockerBuildArgsApp
+{
+    public class AppMarker;
+}

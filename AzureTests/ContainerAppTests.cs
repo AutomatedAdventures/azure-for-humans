@@ -71,10 +71,11 @@ public class ContainerAppTests
         Assert.That(content, Is.EqualTo("TestContainerAppWithProjectDependencies deployment successful!"));
     }
 
-    [Test, Category("RealAzure")]
-    public async Task DeployContainerApp_WithDockerBuildArguments()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp_WithDockerBuildArguments(TestExecutionContext context)
     {
-        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string containerAppName = GenerateContainerAppName();
         var buildArgs = new Dictionary<string, string>
                         {
@@ -87,7 +88,7 @@ public class ContainerAppTests
             dockerBuildArguments: buildArgs);
 
         await AssertResourceGroupExists(azure, containerAppName);
-        using var client = new HttpClient { BaseAddress = new Uri(containerApp.Url) };
+        using var client = context.HttpClientFor(containerApp.Url);
         var response = await client.GetAsync("/variable/APP_GREETING");
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         string value = await response.Content.ReadAsStringAsync();

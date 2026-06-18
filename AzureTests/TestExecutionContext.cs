@@ -28,10 +28,12 @@ public class FakeExecutionContext : TestExecutionContext
 {
     private readonly FakeArmClient _arm = new();
     private readonly WebApplicationFactory<Program> _projectDependenciesApp = new();
+    private readonly WebApplicationFactory<DockerBuildArgsApp.AppMarker> _dockerBuildArgsApp = new();
 
     public FakeExecutionContext()
     {
         _ = _projectDependenciesApp.Server;
+        _ = _dockerBuildArgsApp.Server;
     }
 
     public override AzureCloud Azure() =>
@@ -41,15 +43,36 @@ public class FakeExecutionContext : TestExecutionContext
     {
         var baseAddress = BaseAddressFor(url);
         var app = _arm.WebAppAt(baseAddress.Host);
-        var handler = app?.ProjectDirectory == "App"
-            ? _projectDependenciesApp.Server.CreateHandler()
-            : new FakeAppHandler(_arm);
+        var handler = HandlerFor(app);
         return new HttpClient(handler) { BaseAddress = baseAddress };
+    }
+
+    private HttpMessageHandler HandlerFor(FakeWebApp? app)
+    {
+        switch (app?.ProjectDirectory)
+        {
+            case "App":
+                return _projectDependenciesApp.Server.CreateHandler();
+            case "TestContainerAppWithDockerBuildArgs":
+                PublishEnvironmentVariables(app);
+                return _dockerBuildArgsApp.Server.CreateHandler();
+            default:
+                return new FakeAppHandler(_arm);
+        }
+    }
+
+    private static void PublishEnvironmentVariables(FakeWebApp app)
+    {
+        foreach (var variable in app.EnvironmentVariables)
+        {
+            Environment.SetEnvironmentVariable(variable.Key, variable.Value);
+        }
     }
 
     public override ValueTask DisposeAsync()
     {
         _projectDependenciesApp.Dispose();
+        _dockerBuildArgsApp.Dispose();
         return ValueTask.CompletedTask;
     }
 }

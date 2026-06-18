@@ -51,7 +51,15 @@ public class FakeContainerAppService(FakeArmClient arm) : IContainerAppService
         string? managedIdentityResourceId)
     {
         string fqdn = $"{name.ToLower()}.fake.azurecontainerapps.io";
-        var app = arm.RecordWebApp(fqdn, arm.ProjectForImage(imageName) ?? name, environmentVariables);
+        var combinedEnvironment = new Dictionary<string, string>(arm.BuildArgumentsForImage(imageName));
+        if (environmentVariables is not null)
+        {
+            foreach (var variable in environmentVariables)
+            {
+                combinedEnvironment[variable.Key] = variable.Value;
+            }
+        }
+        var app = arm.RecordWebApp(fqdn, arm.ProjectForImage(imageName) ?? name, combinedEnvironment);
         return Task.FromResult(new ContainerAppDeployment(fqdn, new FakeApplicationLogs(app)));
     }
 }

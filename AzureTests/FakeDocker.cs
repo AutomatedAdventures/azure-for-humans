@@ -20,7 +20,9 @@ public class FakeDocker(FakeArmClient arm) : IDocker
             throw new Exception($"Docker build failed: base image '{baseImage}' could not be pulled.");
         }
 
-        arm.RecordImageProject(imageTag, Path.GetFileName(Path.GetDirectoryName(dockerfilePath))!);
+        string projectDirectory = Path.GetFileName(Path.GetDirectoryName(Path.Combine(buildContext.FullName, dockerfilePath)))!;
+        arm.RecordImageProject(imageTag, projectDirectory);
+        arm.RecordImageBuildArguments(imageTag, buildArguments ?? new());
         return Task.CompletedTask;
     }
 

@@ -13,12 +13,19 @@ public class FakeArmClient : IArmClient
     private readonly HashSet<string> _resourceGroups = new();
     private readonly Dictionary<string, FakeWebApp> _webApps = new();
     private readonly Dictionary<string, string> _imageProjects = new();
+    private readonly Dictionary<string, Dictionary<string, string>> _imageBuildArguments = new();
 
     public AzureLocation? RegionWhereResourceGroupWasCreated { get; private set; }
 
     internal void RecordImageProject(string imageTag, string project) => _imageProjects[imageTag] = project;
 
     internal string? ProjectForImage(string imageTag) => _imageProjects.GetValueOrDefault(imageTag);
+
+    internal void RecordImageBuildArguments(string imageTag, Dictionary<string, string> buildArguments) =>
+        _imageBuildArguments[imageTag] = buildArguments;
+
+    internal Dictionary<string, string> BuildArgumentsForImage(string imageTag) =>
+        _imageBuildArguments.GetValueOrDefault(imageTag) ?? new();
 
     internal FakeWebApp RecordWebApp(string host, string projectDirectory, Dictionary<string, string>? environmentVariables)
     {
