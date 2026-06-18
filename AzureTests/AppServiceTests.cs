@@ -28,14 +28,14 @@ public class AppServiceTests
             $"Resource group '{appServiceName}' should have been cleaned up after deployment failure");
     }
 
-    [Test, Category("RealAzure")]
-    public async Task DeployAppService()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployAppService(TestExecutionContext context)
     {
-        var azure = new AzureCloud();
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string appServiceName = GenerateAppServiceName();
         await using var app = await azure.DeployAppService(projectDirectory: "TestAppService", name: appServiceName);
-        using var client = new HttpClient();
-        client.BaseAddress = new Uri($"https://{appServiceName.ToLower()}.azurewebsites.net");
+        using var client = context.HttpClientFor(app);
         var response = await client.GetAsync("/");
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         string content = await response.Content.ReadAsStringAsync();

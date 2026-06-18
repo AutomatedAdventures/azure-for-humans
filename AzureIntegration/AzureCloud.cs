@@ -25,6 +25,7 @@ public class AzureCloud
     private readonly ArmClient _armClient;
     private readonly IArmClient _arm;
     private readonly IDocker _docker;
+    private readonly IAppService _appService;
     private readonly IReadOnlyList<AzureLocation> _locations;
     private SubscriptionResource _subscription;
     public AzureLocation Location { get; }
@@ -55,8 +56,14 @@ public class AzureCloud
     }
 
     public AzureCloud(IArmClient armClient, IDocker docker, IEnumerable<AzureLocation> locations)
+        : this(armClient, new FailingAppService(), docker, locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IAppService appService, IDocker docker, IEnumerable<AzureLocation> locations)
     {
         _arm = armClient;
+        _appService = appService;
         _docker = docker;
         var configuredLocations = locations.ToArray();
         Location = configuredLocations.First();
@@ -72,6 +79,7 @@ public class AzureCloud
         _armClient = new ArmClient(_azureCredentials);
         _arm = new ArmClientAdapter(_armClient);
         _docker = new ProcessDocker();
+        _appService = new RealAppService(_azureCredentials);
         _subscription = null!;
         Location = location ?? AzureLocation.WestEurope;
         _locations = new[] { Location };
@@ -178,7 +186,7 @@ public class AzureCloud
             var functionApp = await resourceGroup.Resource.GetWebSites().CreateOrUpdateAsync(
                                   WaitUntil.Completed, name, functionAppData);
 
-            await DeployZipFile(zipFilePath, name);
+            await DeployZipFile(_azureCredentials, zipFilePath, name);
 
             Console.WriteLine($"Function App '{functionApp.Value.Data.Name}' created successfully.");
 
@@ -195,37 +203,11 @@ public class AzureCloud
     {
         string zipFilePath = CreateDeploymentZipFile(projectDirectory, name);
         var resourceGroup = await CreateResourceGroup(name);
-        
+
         try
         {
-            // Create App Service Plan specifically for web apps using the dedicated method
-            string appServicePlanName = $"{name.ToLower()}-plan-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
-            var appServicePlan = await resourceGroup.CreateAppServicePlanForWebApp(appServicePlanName);
-
-            var appSettings = new List<AppServiceNameValuePair>
-                              {
-                                  new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") }
-                              };
-            appSettings = AddEnvironmentVariablesToAppSettings(appSettings, environmentVariables);
-            var webAppData = new WebSiteData(resourceGroup.Resource.Data.Location)
-                             {
-                                 AppServicePlanId = appServicePlan.Id,
-                                 Kind = "app,linux",
-                                 SiteConfig = new SiteConfigProperties
-                                              {
-                                                  AppSettings = appSettings,
-                                                  LinuxFxVersion = "DOTNETCORE|8.0"
-                                              }
-                             };
-            var webApp = await resourceGroup.Resource.GetWebSites().CreateOrUpdateAsync(
-                             WaitUntil.Completed, name, webAppData);
-
-            await DeployZipFile(zipFilePath, name);
-
-            // Wait for the App Service to be ready to receive HTTP requests
-            await WaitForAppServiceToBeReady(webApp.Value.Data.DefaultHostName);
-
-            return new AzureWebApp(webApp.Value, resourceGroup.Resource.Data.Name, this);
+            string hostName = await _appService.Deploy(resourceGroup, name, projectDirectory, environmentVariables, zipFilePath);
+            return new AzureWebApp(name, hostName, resourceGroup.Name, this);
         }
         catch (Exception)
         {
@@ -515,7 +497,7 @@ public class AzureCloud
     }
 
 
-    private async Task DeployZipFile(string zipFilePath, string serviceName)
+    internal static async Task DeployZipFile(TokenCredential credentials, string zipFilePath, string serviceName)
     {
         var httpClient = new HttpClient
                          {
@@ -525,7 +507,7 @@ public class AzureCloud
         await using var fileStream = new FileStream(zipFilePath, FileMode.Open, FileAccess.Read);
         using var content = new StreamContent(fileStream);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
-        var accessToken = await _azureCredentials.GetTokenAsync(new TokenRequestContext(["https://management.azure.com/.default"]), CancellationToken.None);
+        var accessToken = await credentials.GetTokenAsync(new TokenRequestContext(["https://management.azure.com/.default"]), CancellationToken.None);
         httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
 
         Console.WriteLine($"Deploying zip file to {serviceName}...");
@@ -540,7 +522,7 @@ public class AzureCloud
         Console.WriteLine($"Zip file deployed successfully to {serviceName}");
     }
 
-    private static List<AppServiceNameValuePair> AddEnvironmentVariablesToAppSettings(
+    internal static List<AppServiceNameValuePair> AddEnvironmentVariablesToAppSettings(
         List<AppServiceNameValuePair> baseSettings,
         Dictionary<string, string>? environmentVariables)
     {
@@ -559,7 +541,7 @@ public class AzureCloud
         return appSettings;
     }
 
-    private static async Task WaitForAppServiceToBeReady(string hostName, int timeoutMinutes = 10, int intervalSeconds = 30)
+    internal static async Task WaitForAppServiceToBeReady(string hostName, int timeoutMinutes = 10, int intervalSeconds = 30)
     {
         string appUrl = $"https://{hostName}";
         var timeout = TimeSpan.FromMinutes(timeoutMinutes);

@@ -7,6 +7,8 @@ public abstract class TestExecutionContext : IAsyncDisposable
 {
     public abstract AzureCloud Azure();
 
+    public abstract HttpClient HttpClientFor(AzureWebApp app);
+
     public TestExecutionContext Started() => this;
 
     public virtual ValueTask DisposeAsync() => ValueTask.CompletedTask;
@@ -20,15 +22,20 @@ public abstract class TestExecutionContext : IAsyncDisposable
 
 public class FakeExecutionContext : TestExecutionContext
 {
-    public override AzureCloud Azure()
-    {
-        var arm = new FakeArmClient();
-        return new AzureCloud(arm, new FakeDocker(arm), new[] { AzureLocation.WestEurope });
-    }
+    private readonly FakeArmClient _arm = new();
+
+    public override AzureCloud Azure() =>
+        new(_arm, new FakeAppService(_arm), new FakeDocker(_arm), new[] { AzureLocation.WestEurope });
+
+    public override HttpClient HttpClientFor(AzureWebApp app) =>
+        new(new FakeAppHandler(_arm)) { BaseAddress = new Uri($"https://{app.Url}") };
 }
 
 public class RealExecutionContext : TestExecutionContext
 {
     public override AzureCloud Azure() =>
         new(location: AzureLocation.EastUS);
+
+    public override HttpClient HttpClientFor(AzureWebApp app) =>
+        new() { BaseAddress = new Uri($"https://{app.Url}") };
 }

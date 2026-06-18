@@ -11,8 +11,14 @@ public class FakeArmClient : IArmClient
     private readonly HashSet<AzureLocation> _regionsWithoutCapacity = new();
     private readonly Dictionary<string, FakeRegistry> _registries = new();
     private readonly HashSet<string> _resourceGroups = new();
+    private readonly Dictionary<string, FakeWebApp> _webApps = new();
 
     public AzureLocation? RegionWhereResourceGroupWasCreated { get; private set; }
+
+    internal void RecordWebApp(string host, string projectDirectory, Dictionary<string, string>? environmentVariables) =>
+        _webApps[host] = new FakeWebApp(projectDirectory, environmentVariables ?? new());
+
+    internal FakeWebApp? WebAppAt(string host) => _webApps.GetValueOrDefault(host);
 
     public FakeArmClient ThatHasNoCapacityIn(AzureLocation location)
     {
