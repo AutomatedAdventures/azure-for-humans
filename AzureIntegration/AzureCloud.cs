@@ -28,11 +28,13 @@ public class AzureCloud
     private readonly IAppService _appService;
     private readonly IFunctionService _functionService;
     private readonly IContainerAppService _containerAppService;
+    private readonly IManagedIdentityService _managedIdentityService;
     private readonly IReadOnlyList<AzureLocation> _locations;
     private SubscriptionResource _subscription;
     public AzureLocation Location { get; }
 
     internal IDocker Docker => _docker;
+    internal IManagedIdentityService ManagedIdentityService => _managedIdentityService;
 
     // Static lock and flag for MSBuild registration to ensure thread safety
     private static readonly object MsBuildLock = new();
@@ -73,11 +75,17 @@ public class AzureCloud
     }
 
     public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IContainerAppService containerAppService, IDocker docker, IEnumerable<AzureLocation> locations)
+        : this(armClient, appService, functionService, containerAppService, new FailingManagedIdentityService(), docker, locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IContainerAppService containerAppService, IManagedIdentityService managedIdentityService, IDocker docker, IEnumerable<AzureLocation> locations)
     {
         _arm = armClient;
         _appService = appService;
         _functionService = functionService;
         _containerAppService = containerAppService;
+        _managedIdentityService = managedIdentityService;
         _docker = docker;
         var configuredLocations = locations.ToArray();
         Location = configuredLocations.First();
@@ -96,6 +104,7 @@ public class AzureCloud
         _appService = new RealAppService(_azureCredentials);
         _functionService = new RealFunctionService(_azureCredentials);
         _containerAppService = new RealContainerAppService();
+        _managedIdentityService = new RealManagedIdentityService();
         _subscription = null!;
         Location = location ?? AzureLocation.WestEurope;
         _locations = new[] { Location };
