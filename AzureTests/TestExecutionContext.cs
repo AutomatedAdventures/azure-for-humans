@@ -3,6 +3,7 @@ using AzureIntegration;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace AzureTests;
@@ -32,6 +33,7 @@ public abstract class TestExecutionContext : IAsyncDisposable
 public class FakeExecutionContext : TestExecutionContext
 {
     private readonly FakeArmClient _arm = new();
+    private readonly FakeKeyVaultService _keyVault = new();
     private readonly WebApplicationFactory<Program> _projectDependenciesApp = new();
     private readonly WebApplicationFactory<DockerBuildArgsApp.AppMarker> _dockerBuildArgsApp = new();
     private readonly WebApplicationFactory<ContainerApp.AppMarker> _containerApp = new();
@@ -57,7 +59,7 @@ public class FakeExecutionContext : TestExecutionContext
     }
 
     public override AzureCloud Azure() =>
-        new(_arm, new FakeAppService(_arm), new FakeFunctionService(_arm), new FakeContainerAppService(_arm), new FakeManagedIdentityService(), new FakeKeyVaultService(), new FakeDocker(_arm), _regions);
+        new(_arm, new FakeAppService(_arm), new FakeFunctionService(_arm), new FakeContainerAppService(_arm), new FakeManagedIdentityService(), _keyVault, new FakeDocker(_arm), _regions);
 
     public override HttpClient HttpClientFor(string url)
     {
@@ -76,19 +78,22 @@ public class FakeExecutionContext : TestExecutionContext
             case "TestContainerAppWithDockerBuildArgs":
                 return Hosted(_dockerBuildArgsApp, app);
             case "TestContainerApp":
-                return Hosted(_containerApp, app);
+                return Hosted(_containerApp, app, services =>
+                    services.AddSingleton<ContainerApp.ISecretReader>(new FakeSecretReader(_keyVault)));
             default:
                 return new FakeAppHandler(_arm);
         }
     }
 
-    private static HttpMessageHandler Hosted<TEntryPoint>(WebApplicationFactory<TEntryPoint> app, FakeWebApp deployedApp)
+    private static HttpMessageHandler Hosted<TEntryPoint>(WebApplicationFactory<TEntryPoint> app, FakeWebApp deployedApp, Action<IServiceCollection>? configureServices = null)
         where TEntryPoint : class =>
         app.WithWebHostBuilder(builder =>
         {
             builder.UseConfiguration(ConfigurationFrom(deployedApp.EnvironmentVariables));
             builder.UseSetting("APPLICATIONINSIGHTS_CONNECTION_STRING", "InstrumentationKey=00000000-0000-0000-0000-000000000000");
             builder.ConfigureLogging(logging => logging.AddProvider(new CapturingLoggerProvider(deployedApp.Logs)));
+            if (configureServices != null)
+                builder.ConfigureServices(configureServices);
         }).Server.CreateHandler();
 
     private static IConfiguration ConfigurationFrom(Dictionary<string, string> environmentVariables) =>

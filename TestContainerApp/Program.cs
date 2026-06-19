@@ -3,6 +3,7 @@ using Azure.Security.KeyVault.Secrets;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddApplicationInsightsTelemetry();
+builder.Services.AddSingleton<ContainerApp.ISecretReader, ContainerApp.KeyVaultSecretReader>();
 var app = builder.Build();
 
 app.MapGet("/", (ILogger<Program> logger) =>
@@ -15,13 +16,11 @@ app.MapGet("/variable/{name}", (string name) =>
     string? value = app.Configuration[name];
     return value == null ? Results.NotFound($"Environment variable '{name}' not found") : Results.Ok(value);
 });
-app.MapGet("/keyvault-secret", async () =>
+app.MapGet("/keyvault-secret", async (ContainerApp.ISecretReader secretReader) =>
 {
-    string keyVaultUri = Environment.GetEnvironmentVariable("KEY_VAULT_URI")!;
-    string secretName = Environment.GetEnvironmentVariable("KEY_VAULT_SECRET_NAME")!;
-    var client = new SecretClient(new Uri(keyVaultUri), new DefaultAzureCredential());
-    KeyVaultSecret secret = await client.GetSecretAsync(secretName);
-    return secret.Value;
+    string keyVaultUri = app.Configuration["KEY_VAULT_URI"]!;
+    string secretName = app.Configuration["KEY_VAULT_SECRET_NAME"]!;
+    return await secretReader.Read(keyVaultUri, secretName);
 });
 
 await app.RunAsync();
@@ -29,4 +28,20 @@ await app.RunAsync();
 namespace ContainerApp
 {
     public class AppMarker;
+
+    public interface ISecretReader
+    {
+        Task<string> Read(string vaultUri, string secretName);
+    }
+
+    public class KeyVaultSecretReader : ISecretReader
+    {
+        public async Task<string> Read(string vaultUri, string secretName)
+        {
+            var client = new SecretClient(new Uri(vaultUri), new DefaultAzureCredential());
+            KeyVaultSecret secret = await client.GetSecretAsync(secretName);
+            return secret.Value;
+        }
+    }
 }
+

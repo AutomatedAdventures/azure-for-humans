@@ -207,10 +207,11 @@ public class ContainerAppTests
         Assert.That(content, Is.EqualTo("TestContainerApp deployment successful!"));
     }
 
-    [Test, Category("RealAzure")]
-    public async Task DeployContainerApp_WithManagedIdentity_CanReadKeyVaultSecretViaIdentity()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp_WithManagedIdentity_CanReadKeyVaultSecretViaIdentity(TestExecutionContext context)
     {
-        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string containerAppName = GenerateContainerAppName();
         string secretValue = Guid.NewGuid().ToString();
 
@@ -234,10 +235,11 @@ public class ContainerAppTests
                 { "KEY_VAULT_SECRET_NAME", "test-secret" }
             });
 
-        using var client = new HttpClient { BaseAddress = new Uri(containerApp.Url) };
+        using var client = context.HttpClientFor(containerApp.Url);
         var response = await client.GetAsync("/keyvault-secret");
         string retrievedSecret = await response.Content.ReadAsStringAsync();
-        Assert.That(retrievedSecret.Trim('"'), Is.EqualTo(secretValue));
+        Assert.That(retrievedSecret.Trim('"'), Is.EqualTo(secretValue),
+            "A container app with a managed identity should read the Key Vault secret it was granted access to.");
     }
 
     [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
