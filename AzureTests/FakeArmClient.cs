@@ -9,8 +9,9 @@ namespace AzureTests;
 public class FakeArmClient : IArmClient
 {
     private readonly HashSet<AzureLocation> _regionsWithoutCapacity = new();
+    private readonly HashSet<AzureLocation> _regionsWithoutContainerAppCapacity = new();
     private readonly Dictionary<string, FakeRegistry> _registries = new();
-    private readonly HashSet<string> _resourceGroups = new();
+    private readonly Dictionary<string, AzureLocation> _resourceGroups = new();
     private readonly Dictionary<string, FakeWebApp> _webApps = new();
     private readonly Dictionary<string, string> _imageProjects = new();
     private readonly Dictionary<string, Dictionary<string, string>> _imageBuildArguments = new();
@@ -42,6 +43,15 @@ public class FakeArmClient : IArmClient
         return this;
     }
 
+    public FakeArmClient ThatHasNoContainerAppCapacityIn(AzureLocation location)
+    {
+        _regionsWithoutContainerAppCapacity.Add(location);
+        return this;
+    }
+
+    internal bool HasContainerAppCapacityIn(AzureLocation location) =>
+        !_regionsWithoutContainerAppCapacity.Contains(location);
+
     public Task<ISubscriptionResource> GetDefaultSubscriptionAsync() =>
         Task.FromResult<ISubscriptionResource>(new FakeSubscriptionResource(this));
 
@@ -70,13 +80,14 @@ public class FakeArmClient : IArmClient
     internal void DeleteRegistry(string name) =>
         _registries.Remove($"{name.ToLower()}.azurecr.io");
 
-    internal void RecordResourceGroup(string name) => _resourceGroups.Add(name);
+    internal void RecordResourceGroup(string name, AzureLocation location) => _resourceGroups[name] = location;
 
     internal void RemoveResourceGroup(string name) => _resourceGroups.Remove(name);
 
-    internal bool HasResourceGroup(string name) => _resourceGroups.Contains(name);
+    internal bool HasResourceGroup(string name) => _resourceGroups.ContainsKey(name);
 
-    internal IReadOnlyList<string> ResourceGroupNames => _resourceGroups.ToList();
+    internal IReadOnlyList<(string Name, AzureLocation Location)> ResourceGroups =>
+        _resourceGroups.Select(entry => (entry.Key, entry.Value)).ToList();
 
     internal static RequestFailedException CapacityError(AzureLocation location) =>
         new(status: 400,
@@ -102,28 +113,30 @@ internal class FakeResourceGroupCollection(FakeArmClient armClient) : IResourceG
         }
 
         armClient.RecordResourceGroupCreatedIn(region);
-        armClient.RecordResourceGroup(name);
-        return Task.FromResult<IResourceGroupResource>(new FakeResourceGroupResource(armClient, name));
+        armClient.RecordResourceGroup(name, region);
+        return Task.FromResult<IResourceGroupResource>(new FakeResourceGroupResource(armClient, name, region));
     }
 
     public Task<IResourceGroupResource> GetAsync(string name) =>
-        Task.FromResult<IResourceGroupResource>(new FakeResourceGroupResource(armClient, name));
+        Task.FromResult<IResourceGroupResource>(new FakeResourceGroupResource(armClient, name, default));
 
     public Task<bool> ExistsAsync(string name) =>
         Task.FromResult(armClient.HasResourceGroup(name));
 
     public Task<IReadOnlyList<IResourceGroupResource>> GetAllAsync() =>
         Task.FromResult<IReadOnlyList<IResourceGroupResource>>(
-            armClient.ResourceGroupNames
-                .Select(name => (IResourceGroupResource)new FakeResourceGroupResource(armClient, name))
+            armClient.ResourceGroups
+                .Select(group => (IResourceGroupResource)new FakeResourceGroupResource(armClient, group.Name, group.Location))
                 .ToList());
 }
 
-internal class FakeResourceGroupResource(FakeArmClient armClient, string name) : IResourceGroupResource
+internal class FakeResourceGroupResource(FakeArmClient armClient, string name, AzureLocation location) : IResourceGroupResource
 {
     public ResourceGroupResource? Concrete => null;
 
     public string Name => name;
+
+    public AzureLocation Location => location;
 
     public IContainerRegistryCollection GetContainerRegistries() =>
         new FakeContainerRegistryCollection(armClient);

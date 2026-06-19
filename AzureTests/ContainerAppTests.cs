@@ -180,6 +180,23 @@ public class ContainerAppTests
             $"Resource group '{containerAppName}' should exist after successful deployment");
     }
 
+    [Test]
+    public async Task WhenTheFirstRegionHasNoCapacityForTheContainerAppEnvironment_TheDeploymentFailsOverToTheNextRegion()
+    {
+        await using var context = new FakeExecutionContext()
+            .WithRegions(AzureLocation.EastUS, AzureLocation.WestEurope)
+            .WithNoContainerAppCapacityIn(AzureLocation.EastUS);
+        var azure = context.Azure();
+        string containerAppName = GenerateContainerAppName();
+
+        await using var containerApp = await azure.DeployContainerApp(
+            projectDirectory: "TestContainerApp",
+            name: containerAppName);
+
+        var resourceGroup = (await azure.GetResourceGroups()).Single(group => group.Name == containerAppName);
+        Assert.That(resourceGroup.Location, Is.EqualTo(AzureLocation.WestEurope),
+            "When the first region has no container app capacity, the deployment should fail over to the next configured region.");
+    }
     private static async Task AssertContainerAppRespondsWithExpectedContent(TestExecutionContext context, AzureContainerApp containerApp)
     {
         using var client = context.HttpClientFor(containerApp.Url);

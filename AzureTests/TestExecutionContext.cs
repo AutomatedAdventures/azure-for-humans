@@ -35,6 +35,7 @@ public class FakeExecutionContext : TestExecutionContext
     private readonly WebApplicationFactory<Program> _projectDependenciesApp = new();
     private readonly WebApplicationFactory<DockerBuildArgsApp.AppMarker> _dockerBuildArgsApp = new();
     private readonly WebApplicationFactory<ContainerApp.AppMarker> _containerApp = new();
+    private AzureLocation[] _regions = { AzureLocation.WestEurope };
 
     public override TimeProvider Time { get; } = new InstantTimeProvider();
 
@@ -43,8 +44,20 @@ public class FakeExecutionContext : TestExecutionContext
         _ = _projectDependenciesApp.Server;
     }
 
+    public FakeExecutionContext WithRegions(params AzureLocation[] regions)
+    {
+        _regions = regions;
+        return this;
+    }
+
+    public FakeExecutionContext WithNoContainerAppCapacityIn(AzureLocation location)
+    {
+        _arm.ThatHasNoContainerAppCapacityIn(location);
+        return this;
+    }
+
     public override AzureCloud Azure() =>
-        new(_arm, new FakeAppService(_arm), new FakeFunctionService(_arm), new FakeContainerAppService(_arm), new FakeDocker(_arm), new[] { AzureLocation.WestEurope });
+        new(_arm, new FakeAppService(_arm), new FakeFunctionService(_arm), new FakeContainerAppService(_arm), new FakeDocker(_arm), _regions);
 
     public override HttpClient HttpClientFor(string url)
     {

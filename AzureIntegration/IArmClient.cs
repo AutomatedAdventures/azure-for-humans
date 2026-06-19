@@ -30,6 +30,7 @@ public interface IResourceGroupResource
 {
     ResourceGroupResource? Concrete { get; }
     string Name { get; }
+    AzureLocation Location { get; }
     IContainerRegistryCollection GetContainerRegistries();
     Task DeleteAsync(WaitUntil waitUntil);
 }
@@ -101,6 +102,8 @@ internal class ResourceGroupResourceAdapter(ResourceGroupResource resource) : IR
     public ResourceGroupResource? Concrete => resource;
 
     public string Name => resource.Data.Name;
+
+    public AzureLocation Location => resource.Data.Location;
 
     public IContainerRegistryCollection GetContainerRegistries() =>
         new ContainerRegistryCollectionAdapter(resource.GetContainerRegistries());

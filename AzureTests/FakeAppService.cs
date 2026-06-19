@@ -50,6 +50,12 @@ public class FakeContainerAppService(FakeArmClient arm) : IContainerAppService
         Dictionary<string, string>? environmentVariables,
         string? managedIdentityResourceId)
     {
+        var region = resourceGroup.SeamResource!.Location;
+        if (!arm.HasContainerAppCapacityIn(region))
+        {
+            throw FakeArmClient.CapacityError(region);
+        }
+
         string fqdn = $"{name.ToLower()}.fake.azurecontainerapps.io";
         var combinedEnvironment = new Dictionary<string, string>(arm.BuildArgumentsForImage(imageName));
         if (environmentVariables is not null)

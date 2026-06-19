@@ -1,3 +1,4 @@
+using Azure.Core;
 using Azure.ResourceManager.Resources;
 using Azure.ResourceManager.Storage;
 using Azure.ResourceManager.Storage.Models;
@@ -17,6 +18,8 @@ public record ResourceGroup(ResourceGroupResource Resource, AzureCloud AzureClou
     public IResourceGroupResource? SeamResource { get; init; }
 
     public string Name => SeamResource?.Name ?? Resource.Data.Name;
+
+    public AzureLocation Location => SeamResource?.Location ?? Resource.Data.Location;
 
     public async Task<StorageAccount> CreateStorageAccount(string name)
     {

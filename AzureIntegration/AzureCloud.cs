@@ -222,25 +222,45 @@ public class AzureCloud
 
         (var buildContext, var projectDir) = ProjectPathResolver.GetBuildContextPaths(projectDirectory, workspaceRoot);
 
-        var resourceGroup = await CreateResourceGroup(name);
-
-        try
+        RequestFailedException? lastCapacityError = null;
+        foreach (var location in _locations)
         {
-            var acr = await ResolveContainerRegistry(resourceGroup, name, containerRegistryResourceId);
+            var resourceGroup = await CreateResourceGroupIn(name, location);
 
-            string imageName = await BuildAndPushImage(projectDir, buildContext, acr, name, dockerBuildArguments);
+            try
+            {
+                var acr = await ResolveContainerRegistry(resourceGroup, name, containerRegistryResourceId);
 
-            var deployment = await _containerAppService.Deploy(resourceGroup, name, imageName, acr, environmentVariables, managedIdentityResourceId);
+                string imageName = await BuildAndPushImage(projectDir, buildContext, acr, name, dockerBuildArguments);
 
-            DeploymentLogger.Log($"Deployment complete: https://{deployment.Fqdn}");
-            return new AzureContainerApp(name, deployment.Fqdn, resourceGroup.Name, this, deployment.Logs);
+                var deployment = await _containerAppService.Deploy(resourceGroup, name, imageName, acr, environmentVariables, managedIdentityResourceId);
+
+                DeploymentLogger.Log($"Deployment complete: https://{deployment.Fqdn}");
+                return new AzureContainerApp(name, deployment.Fqdn, resourceGroup.Name, this, deployment.Logs);
+            }
+            catch (RequestFailedException ex) when (ex.ErrorCode == "AKSCapacityHeavyUsage")
+            {
+                lastCapacityError = ex;
+                DeploymentLogger.Log($"Region '{location}' has no capacity, trying the next configured region...");
+                await DeleteResourceGroup(name);
+            }
+            catch (Exception ex)
+            {
+                DeploymentLogger.LogError($"Deployment failed: {ex.Message}. Cleaning up resources...");
+                await DeleteResourceGroup(name);
+                throw;
+            }
         }
-        catch (Exception ex)
-        {
-            DeploymentLogger.LogError($"Deployment failed: {ex.Message}. Cleaning up resources...");
-            await DeleteResourceGroup(name);
-            throw;
-        }
+
+        throw lastCapacityError!;
+    }
+
+    private async Task<ResourceGroup> CreateResourceGroupIn(string name, AzureLocation location)
+    {
+        var subscription = await _arm.GetDefaultSubscriptionAsync();
+        var createdResourceGroup = await subscription.GetResourceGroups()
+            .CreateOrUpdateAsync(WaitUntil.Completed, name, new ResourceGroupData(location));
+        return new ResourceGroup(createdResourceGroup.Concrete!, this) { SeamResource = createdResourceGroup };
     }
 
     private async Task<IContainerRegistryResource> CreateContainerRegistry(ResourceGroup resourceGroup, string name)
