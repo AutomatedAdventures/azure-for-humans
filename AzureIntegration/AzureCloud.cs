@@ -31,7 +31,6 @@ public class AzureCloud
     private readonly IManagedIdentityService _managedIdentityService;
     private readonly IKeyVaultService _keyVaultService;
     private readonly IReadOnlyList<AzureLocation> _locations;
-    private SubscriptionResource _subscription;
     public AzureLocation Location { get; }
 
     internal IDocker Docker => _docker;
@@ -100,7 +99,6 @@ public class AzureCloud
         _locations = configuredLocations;
         _azureCredentials = null!;
         _armClient = null!;
-        _subscription = null!;
     }
 
     public AzureCloud(TokenCredential credentials, AzureLocation? location = null)
@@ -114,30 +112,10 @@ public class AzureCloud
         _containerAppService = new RealContainerAppService();
         _managedIdentityService = new RealManagedIdentityService();
         _keyVaultService = new RealKeyVaultService(_azureCredentials);
-        _subscription = null!;
         Location = location ?? AzureLocation.WestEurope;
         _locations = new[] { Location };
     }
 
-    internal async Task<SubscriptionResource> GetSubscriptionAsync()
-    {
-        if (_subscription == null)
-        {
-            try
-            {
-                _subscription = await _armClient.GetDefaultSubscriptionAsync();
-            }
-            catch (AuthenticationFailedException)
-            {
-                throw new AuthenticationFailedException("Invalid credentials provided. Please check your client ID, client secret, and tenant ID.");
-            }
-            catch (Exception ex) when (ex.InnerException is AuthenticationFailedException)
-            {
-                throw new AuthenticationFailedException("Invalid credentials provided. Please check your client ID, client secret, and tenant ID.");
-            }
-        }
-        return _subscription;
-    }
 
     public Task<ResourceGroup> CreateResourceGroup(string name) =>
         CreateResourceGroupIn(name, Location);
