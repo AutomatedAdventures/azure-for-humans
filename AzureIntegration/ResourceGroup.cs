@@ -1,7 +1,5 @@
 using Azure.Core;
 using Azure.ResourceManager.Resources;
-using Azure.ResourceManager.Storage;
-using Azure.ResourceManager.Storage.Models;
 using Azure.ResourceManager.AppService;
 using Azure.ResourceManager.AppService.Models;
 using Azure.ResourceManager.ApplicationInsights;
@@ -13,8 +11,6 @@ namespace AzureIntegration;
 
 public record ResourceGroup(ResourceGroupResource Resource, AzureCloud AzureCloud)
 {
-    private const int MaxStorageAccountNameLength = 24;
-
     public IResourceGroupResource? SeamResource { get; init; }
 
     public string Name => SeamResource?.Name ?? Resource.Data.Name;
@@ -23,16 +19,8 @@ public record ResourceGroup(ResourceGroupResource Resource, AzureCloud AzureClou
 
     public async Task<StorageAccount> CreateStorageAccount(string name)
     {
-        string storageAccountName = SanitizeStorageAccountName(name);
-        
-        var storageSku = new StorageSku(StorageSkuName.StandardLrs);
-        var storageKind = StorageKind.StorageV2;
-        var storageParameters = new StorageAccountCreateOrUpdateContent(storageSku, storageKind, location: Resource.Data.Location);
-
-        var storageAccount = await Resource.GetStorageAccounts().CreateOrUpdateAsync(
-            WaitUntil.Completed, storageAccountName, storageParameters);
-
-        return new StorageAccount(storageAccount.Value);
+        var deployment = await AzureCloud.StorageService.Create(this, name);
+        return new StorageAccount(deployment.Name, deployment.ConnectionString);
     }
 
     public async Task<AppServicePlan> CreateAppServicePlanForFunctionApp(string name)
@@ -86,17 +74,5 @@ public record ResourceGroup(ResourceGroupResource Resource, AzureCloud AzureClou
         var connectionString = appInsights.Value.Data.ConnectionString ?? string.Empty;
 
         return new ApplicationInsights(workspaceId!, logsQueryClient, connectionString);
-    }
-
-    private static string SanitizeStorageAccountName(string name)
-    {
-        string storageAccountName = $"{name.ToLower().Replace("-", "")}storage";
-        
-        if (storageAccountName.Length > MaxStorageAccountNameLength)
-        {
-            storageAccountName = storageAccountName[..MaxStorageAccountNameLength];
-        }
-        
-        return storageAccountName;
     }
 }

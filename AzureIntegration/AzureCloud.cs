@@ -30,12 +30,14 @@ public class AzureCloud
     private readonly IContainerAppService _containerAppService;
     private readonly IManagedIdentityService _managedIdentityService;
     private readonly IKeyVaultService _keyVaultService;
+    private readonly IStorageService _storageService;
     private readonly IReadOnlyList<AzureLocation> _locations;
     public AzureLocation Location { get; }
 
     internal IDocker Docker => _docker;
     internal IManagedIdentityService ManagedIdentityService => _managedIdentityService;
     internal IKeyVaultService KeyVaultService => _keyVaultService;
+    internal IStorageService StorageService => _storageService;
 
     // Static lock and flag for MSBuild registration to ensure thread safety
     private static readonly object MsBuildLock = new();
@@ -86,6 +88,11 @@ public class AzureCloud
     }
 
     public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IContainerAppService containerAppService, IManagedIdentityService managedIdentityService, IKeyVaultService keyVaultService, IDocker docker, IEnumerable<AzureLocation> locations)
+        : this(armClient, appService, functionService, containerAppService, managedIdentityService, keyVaultService, new FailingStorageService(), docker, locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IContainerAppService containerAppService, IManagedIdentityService managedIdentityService, IKeyVaultService keyVaultService, IStorageService storageService, IDocker docker, IEnumerable<AzureLocation> locations)
     {
         _arm = armClient;
         _appService = appService;
@@ -93,6 +100,7 @@ public class AzureCloud
         _containerAppService = containerAppService;
         _managedIdentityService = managedIdentityService;
         _keyVaultService = keyVaultService;
+        _storageService = storageService;
         _docker = docker;
         var configuredLocations = locations.ToArray();
         Location = configuredLocations.First();
@@ -112,6 +120,7 @@ public class AzureCloud
         _containerAppService = new RealContainerAppService();
         _managedIdentityService = new RealManagedIdentityService();
         _keyVaultService = new RealKeyVaultService(_azureCredentials);
+        _storageService = new RealStorageService();
         Location = location ?? AzureLocation.WestEurope;
         _locations = new[] { Location };
     }
