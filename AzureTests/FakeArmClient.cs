@@ -8,15 +8,12 @@ namespace AzureTests;
 
 public class FakeArmClient : IArmClient
 {
-    private readonly HashSet<AzureLocation> _regionsWithoutCapacity = new();
     private readonly HashSet<AzureLocation> _regionsWithoutContainerAppCapacity = new();
     private readonly Dictionary<string, FakeRegistry> _registries = new();
     private readonly Dictionary<string, AzureLocation> _resourceGroups = new();
     private readonly Dictionary<string, FakeWebApp> _webApps = new();
     private readonly Dictionary<string, string> _imageProjects = new();
     private readonly Dictionary<string, Dictionary<string, string>> _imageBuildArguments = new();
-
-    public AzureLocation? RegionWhereResourceGroupWasCreated { get; private set; }
 
     internal void RecordImageProject(string imageTag, string project) => _imageProjects[imageTag] = project;
 
@@ -37,12 +34,6 @@ public class FakeArmClient : IArmClient
 
     internal FakeWebApp? WebAppAt(string host) => _webApps.GetValueOrDefault(host);
 
-    public FakeArmClient ThatHasNoCapacityIn(AzureLocation location)
-    {
-        _regionsWithoutCapacity.Add(location);
-        return this;
-    }
-
     public FakeArmClient ThatHasNoContainerAppCapacityIn(AzureLocation location)
     {
         _regionsWithoutContainerAppCapacity.Add(location);
@@ -60,12 +51,6 @@ public class FakeArmClient : IArmClient
         string loginServer = id.ToString().Split('/').Last();
         return new FakeContainerRegistryResource(this, loginServer);
     }
-
-    internal bool HasCapacityIn(AzureLocation location) =>
-        !_regionsWithoutCapacity.Contains(location);
-
-    internal void RecordResourceGroupCreatedIn(AzureLocation location) =>
-        RegionWhereResourceGroupWasCreated = location;
 
     internal FakeRegistry CreateRegistry(string name)
     {
@@ -107,12 +92,6 @@ internal class FakeResourceGroupCollection(FakeArmClient armClient) : IResourceG
     public Task<IResourceGroupResource> CreateOrUpdateAsync(WaitUntil waitUntil, string name, ResourceGroupData data)
     {
         var region = data.Location;
-        if (!armClient.HasCapacityIn(region))
-        {
-            throw FakeArmClient.CapacityError(region);
-        }
-
-        armClient.RecordResourceGroupCreatedIn(region);
         armClient.RecordResourceGroup(name, region);
         return Task.FromResult<IResourceGroupResource>(new FakeResourceGroupResource(armClient, name, region));
     }

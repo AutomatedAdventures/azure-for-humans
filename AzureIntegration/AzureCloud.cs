@@ -121,27 +121,8 @@ public class AzureCloud
         return _subscription;
     }
 
-    public async Task<ResourceGroup> CreateResourceGroup(string name)
-    {
-        var subscription = await _arm.GetDefaultSubscriptionAsync();
-        RequestFailedException? lastCapacityError = null;
-        foreach (var location in _locations)
-        {
-            try
-            {
-                var createdResourceGroup = await subscription.GetResourceGroups()
-                    .CreateOrUpdateAsync(WaitUntil.Completed, name, new ResourceGroupData(location));
-                return new ResourceGroup(createdResourceGroup.Concrete!, this) { SeamResource = createdResourceGroup };
-            }
-            catch (RequestFailedException ex) when (ex.ErrorCode == "AKSCapacityHeavyUsage")
-            {
-                lastCapacityError = ex;
-                DeploymentLogger.Log($"Region '{location}' has no capacity, trying the next configured region...");
-            }
-        }
-
-        throw lastCapacityError!;
-    }
+    public Task<ResourceGroup> CreateResourceGroup(string name) =>
+        CreateResourceGroupIn(name, Location);
 
     public async Task DeleteResourceGroup(string name)
     {
