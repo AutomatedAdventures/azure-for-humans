@@ -12,37 +12,43 @@ internal class FakeWebApp(string projectDirectory, Dictionary<string, string> en
 
 public class FakeAppService(FakeArmClient arm) : IAppService
 {
-    public Task<string> Deploy(
+    public async Task<string> Deploy(
         ResourceGroup resourceGroup,
         string name,
         string projectDirectory,
         Dictionary<string, string>? environmentVariables,
         string zipFilePath)
     {
+        await resourceGroup.CreateAppServicePlanForWebApp(name);
+
         string host = $"{name.ToLower()}.azurewebsites.net";
         arm.RecordWebApp(host, projectDirectory, environmentVariables);
-        return Task.FromResult(host);
+        return host;
     }
 }
 
 public class FakeFunctionService(FakeArmClient arm) : IFunctionService
 {
-    public Task<FunctionDeployment> Deploy(
+    public async Task<FunctionDeployment> Deploy(
         ResourceGroup resourceGroup,
         string name,
         string projectDirectory,
         Dictionary<string, string>? environmentVariables,
         string zipFilePath)
     {
+        await resourceGroup.CreateStorageAccount(name);
+        await resourceGroup.CreateAppServicePlanForFunctionApp(name);
+        await resourceGroup.CreateApplicationInsights(name);
+
         string host = $"{name.ToLower()}.azurewebsites.net";
         var app = arm.RecordWebApp(host, projectDirectory, environmentVariables);
-        return Task.FromResult(new FunctionDeployment(host, new FakeApplicationLogs(app)));
+        return new FunctionDeployment(host, new FakeApplicationLogs(app));
     }
 }
 
 public class FakeContainerAppService(FakeArmClient arm) : IContainerAppService
 {
-    public Task<ContainerAppDeployment> Deploy(
+    public async Task<ContainerAppDeployment> Deploy(
         ResourceGroup resourceGroup,
         string name,
         string imageName,
@@ -56,6 +62,8 @@ public class FakeContainerAppService(FakeArmClient arm) : IContainerAppService
             throw FakeArmClient.CapacityError(region);
         }
 
+        await resourceGroup.CreateApplicationInsights(name);
+
         string fqdn = $"{name.ToLower()}.fake.azurecontainerapps.io";
         var combinedEnvironment = new Dictionary<string, string>(arm.BuildArgumentsForImage(imageName));
         if (environmentVariables is not null)
@@ -66,7 +74,7 @@ public class FakeContainerAppService(FakeArmClient arm) : IContainerAppService
             }
         }
         var app = arm.RecordWebApp(fqdn, arm.ProjectForImage(imageName) ?? name, combinedEnvironment);
-        return Task.FromResult(new ContainerAppDeployment(fqdn, new FakeApplicationLogs(app)));
+        return new ContainerAppDeployment(fqdn, new FakeApplicationLogs(app));
     }
 }
 
