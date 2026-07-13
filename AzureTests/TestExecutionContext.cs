@@ -59,7 +59,7 @@ public class FakeExecutionContext : TestExecutionContext
     }
 
     public override AzureCloud Azure() =>
-        new(_arm, new FakeAppService(_arm), new FakeFunctionService(_arm), new FakeContainerAppService(_arm), new FakeManagedIdentityService(), _keyVault, new FakeStorageService(), new FakeDocker(_arm), _regions);
+        new(_arm, new FakeAppService(_arm), new FakeFunctionService(_arm), new FakeContainerAppService(_arm), new FakeManagedIdentityService(), _keyVault, new FakeStorageService(), new FakeAppServicePlanService(), new FakeDocker(_arm), _regions);
 
     public override HttpClient HttpClientFor(string url)
     {

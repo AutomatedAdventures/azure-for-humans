@@ -31,6 +31,7 @@ public class AzureCloud
     private readonly IManagedIdentityService _managedIdentityService;
     private readonly IKeyVaultService _keyVaultService;
     private readonly IStorageService _storageService;
+    private readonly IAppServicePlanService _appServicePlanService;
     private readonly IReadOnlyList<AzureLocation> _locations;
     public AzureLocation Location { get; }
 
@@ -38,6 +39,7 @@ public class AzureCloud
     internal IManagedIdentityService ManagedIdentityService => _managedIdentityService;
     internal IKeyVaultService KeyVaultService => _keyVaultService;
     internal IStorageService StorageService => _storageService;
+    internal IAppServicePlanService AppServicePlanService => _appServicePlanService;
 
     // Static lock and flag for MSBuild registration to ensure thread safety
     private static readonly object MsBuildLock = new();
@@ -93,6 +95,11 @@ public class AzureCloud
     }
 
     public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IContainerAppService containerAppService, IManagedIdentityService managedIdentityService, IKeyVaultService keyVaultService, IStorageService storageService, IDocker docker, IEnumerable<AzureLocation> locations)
+        : this(armClient, appService, functionService, containerAppService, managedIdentityService, keyVaultService, storageService, new FailingAppServicePlanService(), docker, locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IContainerAppService containerAppService, IManagedIdentityService managedIdentityService, IKeyVaultService keyVaultService, IStorageService storageService, IAppServicePlanService appServicePlanService, IDocker docker, IEnumerable<AzureLocation> locations)
     {
         _arm = armClient;
         _appService = appService;
@@ -101,6 +108,7 @@ public class AzureCloud
         _managedIdentityService = managedIdentityService;
         _keyVaultService = keyVaultService;
         _storageService = storageService;
+        _appServicePlanService = appServicePlanService;
         _docker = docker;
         var configuredLocations = locations.ToArray();
         Location = configuredLocations.First();
@@ -121,6 +129,7 @@ public class AzureCloud
         _managedIdentityService = new RealManagedIdentityService();
         _keyVaultService = new RealKeyVaultService(_azureCredentials);
         _storageService = new RealStorageService();
+        _appServicePlanService = new RealAppServicePlanService();
         Location = location ?? AzureLocation.WestEurope;
         _locations = new[] { Location };
     }

@@ -1,7 +1,5 @@
 using Azure.Core;
 using Azure.ResourceManager.Resources;
-using Azure.ResourceManager.AppService;
-using Azure.ResourceManager.AppService.Models;
 using Azure.ResourceManager.ApplicationInsights;
 using Azure.ResourceManager.OperationalInsights;
 using Azure.Monitor.Query;
@@ -25,32 +23,14 @@ public record ResourceGroup(ResourceGroupResource Resource, AzureCloud AzureClou
 
     public async Task<AppServicePlan> CreateAppServicePlanForFunctionApp(string name)
     {
-        var appServicePlanData = new AppServicePlanData(Resource.Data.Location)
-        {
-            Sku = new AppServiceSkuDescription { Name = "Y1", Tier = "Dynamic" },
-            Kind = "FunctionApp",
-            IsReserved = true // Use linux
-        };
-
-        var appServicePlan = await Resource.GetAppServicePlans().CreateOrUpdateAsync(
-            WaitUntil.Completed, name, appServicePlanData);
-
-        return new AppServicePlan(appServicePlan.Value);
+        var deployment = await AzureCloud.AppServicePlanService.CreateForFunctionApp(this, name);
+        return new AppServicePlan(deployment.Name, new ResourceIdentifier(deployment.Id));
     }
 
     public async Task<AppServicePlan> CreateAppServicePlanForWebApp(string name)
     {
-        var appServicePlanData = new AppServicePlanData(Resource.Data.Location)
-        {
-            Sku = new AppServiceSkuDescription { Name = "F1", Tier = "Free" },
-            Kind = "linux",
-            IsReserved = true // Use Linux
-        };
-
-        var appServicePlan = await Resource.GetAppServicePlans().CreateOrUpdateAsync(
-            WaitUntil.Completed, name, appServicePlanData);
-
-        return new AppServicePlan(appServicePlan.Value);
+        var deployment = await AzureCloud.AppServicePlanService.CreateForWebApp(this, name);
+        return new AppServicePlan(deployment.Name, new ResourceIdentifier(deployment.Id));
     }
 
     public async Task<ApplicationInsights> CreateApplicationInsights(string name)
