@@ -95,7 +95,7 @@ public class RealContainerAppService : IContainerAppService
 
         await WaitForContainerAppToBeReady(fqdn);
 
-        return new ContainerAppDeployment(fqdn, applicationInsights);
+        return new ContainerAppDeployment(fqdn, applicationInsights.Logs);
     }
 
     private static async Task<ContainerAppManagedEnvironmentResource> CreateContainerAppsEnvironment(ResourceGroup resourceGroup, string name)

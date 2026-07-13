@@ -70,7 +70,7 @@ public class RealFunctionService(TokenCredential credentials) : IFunctionService
 
         Console.WriteLine($"Function App '{functionApp.Value.Data.Name}' created successfully.");
 
-        return new FunctionDeployment(functionApp.Value.Data.DefaultHostName, applicationInsights);
+        return new FunctionDeployment(functionApp.Value.Data.DefaultHostName, applicationInsights.Logs);
     }
 }
 

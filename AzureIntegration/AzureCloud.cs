@@ -22,7 +22,6 @@ namespace AzureIntegration;
 public class AzureCloud
 {
     private readonly TokenCredential _azureCredentials;
-    private readonly ArmClient _armClient;
     private readonly IArmClient _arm;
     private readonly IDocker _docker;
     private readonly IAppService _appService;
@@ -32,6 +31,7 @@ public class AzureCloud
     private readonly IKeyVaultService _keyVaultService;
     private readonly IStorageService _storageService;
     private readonly IAppServicePlanService _appServicePlanService;
+    private readonly IApplicationInsightsService _applicationInsightsService;
     private readonly IReadOnlyList<AzureLocation> _locations;
     public AzureLocation Location { get; }
 
@@ -40,6 +40,7 @@ public class AzureCloud
     internal IKeyVaultService KeyVaultService => _keyVaultService;
     internal IStorageService StorageService => _storageService;
     internal IAppServicePlanService AppServicePlanService => _appServicePlanService;
+    internal IApplicationInsightsService ApplicationInsightsService => _applicationInsightsService;
 
     // Static lock and flag for MSBuild registration to ensure thread safety
     private static readonly object MsBuildLock = new();
@@ -100,6 +101,11 @@ public class AzureCloud
     }
 
     public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IContainerAppService containerAppService, IManagedIdentityService managedIdentityService, IKeyVaultService keyVaultService, IStorageService storageService, IAppServicePlanService appServicePlanService, IDocker docker, IEnumerable<AzureLocation> locations)
+        : this(armClient, appService, functionService, containerAppService, managedIdentityService, keyVaultService, storageService, appServicePlanService, new FailingApplicationInsightsService(), docker, locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IContainerAppService containerAppService, IManagedIdentityService managedIdentityService, IKeyVaultService keyVaultService, IStorageService storageService, IAppServicePlanService appServicePlanService, IApplicationInsightsService applicationInsightsService, IDocker docker, IEnumerable<AzureLocation> locations)
     {
         _arm = armClient;
         _appService = appService;
@@ -109,19 +115,18 @@ public class AzureCloud
         _keyVaultService = keyVaultService;
         _storageService = storageService;
         _appServicePlanService = appServicePlanService;
+        _applicationInsightsService = applicationInsightsService;
         _docker = docker;
         var configuredLocations = locations.ToArray();
         Location = configuredLocations.First();
         _locations = configuredLocations;
         _azureCredentials = null!;
-        _armClient = null!;
     }
 
     public AzureCloud(TokenCredential credentials, AzureLocation? location = null)
     {
         _azureCredentials = credentials;
-        _armClient = new ArmClient(_azureCredentials);
-        _arm = new ArmClientAdapter(_armClient);
+        _arm = new ArmClientAdapter(new ArmClient(_azureCredentials));
         _docker = new ProcessDocker();
         _appService = new RealAppService(_azureCredentials);
         _functionService = new RealFunctionService(_azureCredentials);
@@ -130,6 +135,7 @@ public class AzureCloud
         _keyVaultService = new RealKeyVaultService(_azureCredentials);
         _storageService = new RealStorageService();
         _appServicePlanService = new RealAppServicePlanService();
+        _applicationInsightsService = new RealApplicationInsightsService(_azureCredentials);
         Location = location ?? AzureLocation.WestEurope;
         _locations = new[] { Location };
     }
@@ -526,15 +532,5 @@ public class AzureCloud
         }
 
         return resourceGroups;
-    }
-
-    public ArmClient GetArmClient()
-    {
-        return _armClient;
-    }
-
-    public TokenCredential GetCredential()
-    {
-        return _azureCredentials;
     }
 }
