@@ -37,7 +37,7 @@ public interface IResourceGroupResource
 
 public interface IContainerRegistryCollection
 {
-    Task<IContainerRegistryResource> CreateOrUpdateAsync(WaitUntil waitUntil, string registryName, ContainerRegistryData data);
+    Task<IContainerRegistryResource> CreateOrUpdateAsync(WaitUntil waitUntil, string registryName, AzureLocation location);
 }
 
 public interface IContainerRegistryResource
@@ -114,8 +114,12 @@ internal class ResourceGroupResourceAdapter(ResourceGroupResource resource) : IR
 
 internal class ContainerRegistryCollectionAdapter(ContainerRegistryCollection collection) : IContainerRegistryCollection
 {
-    public async Task<IContainerRegistryResource> CreateOrUpdateAsync(WaitUntil waitUntil, string registryName, ContainerRegistryData data)
+    public async Task<IContainerRegistryResource> CreateOrUpdateAsync(WaitUntil waitUntil, string registryName, AzureLocation location)
     {
+        var data = new ContainerRegistryData(location, new ContainerRegistrySku(ContainerRegistrySkuName.Basic))
+        {
+            IsAdminUserEnabled = true
+        };
         var operation = await collection.CreateOrUpdateAsync(waitUntil, registryName, data);
         return new ContainerRegistryResourceAdapter(operation.Value);
     }

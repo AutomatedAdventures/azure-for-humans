@@ -9,8 +9,6 @@ using Azure.ResourceManager.AppContainers;
 using Azure.ResourceManager.AppContainers.Models;
 using Azure.ResourceManager.AppService;
 using Azure.ResourceManager.AppService.Models;
-using Azure.ResourceManager.ContainerRegistry;
-using Azure.ResourceManager.ContainerRegistry.Models;
 using Azure.ResourceManager.Resources;
 using Microsoft.Build.Evaluation;
 using Microsoft.Build.Framework;
@@ -269,12 +267,8 @@ public class AzureCloud
         string acrName = SanitizeAcrName(name);
         DeploymentLogger.Log($"Creating Container Registry '{acrName}'...");
 
-        var acrData = new ContainerRegistryData(Location, new ContainerRegistrySku(ContainerRegistrySkuName.Basic))
-        {
-            IsAdminUserEnabled = true
-        };
         var acr = await resourceGroup.SeamResource!.GetContainerRegistries()
-            .CreateOrUpdateAsync(WaitUntil.Completed, acrName, acrData);
+            .CreateOrUpdateAsync(WaitUntil.Completed, acrName, Location);
 
         DeploymentLogger.Log($"Container Registry created: {acr.LoginServer}");
         return acr;

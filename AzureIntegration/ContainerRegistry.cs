@@ -1,6 +1,4 @@
 using Azure;
-using Azure.ResourceManager.ContainerRegistry;
-using Azure.ResourceManager.ContainerRegistry.Models;
 
 namespace AzureIntegration;
 
@@ -28,13 +26,8 @@ public class ContainerRegistry(
         DeploymentLogger.Log($"Creating container registry '{registryName}' in '{resourceGroupName}'...");
         var resourceGroup = await azureCloud.CreateResourceGroup(resourceGroupName);
 
-        var acrData = new ContainerRegistryData(azureCloud.Location, new ContainerRegistrySku(ContainerRegistrySkuName.Basic))
-        {
-            IsAdminUserEnabled = true
-        };
-
         var acr = await resourceGroup.SeamResource!.GetContainerRegistries()
-            .CreateOrUpdateAsync(WaitUntil.Completed, registryName, acrData);
+            .CreateOrUpdateAsync(WaitUntil.Completed, registryName, azureCloud.Location);
 
         var credentials = await acr.GetCredentialsAsync();
 

@@ -1,6 +1,5 @@
 using Azure;
 using Azure.Core;
-using Azure.ResourceManager.ContainerRegistry;
 using Azure.ResourceManager.Resources;
 using AzureIntegration;
 
@@ -130,7 +129,7 @@ internal class FakeResourceGroupResource(FakeArmClient armClient, string name, A
 
 internal class FakeContainerRegistryCollection(FakeArmClient armClient) : IContainerRegistryCollection
 {
-    public Task<IContainerRegistryResource> CreateOrUpdateAsync(WaitUntil waitUntil, string registryName, ContainerRegistryData data)
+    public Task<IContainerRegistryResource> CreateOrUpdateAsync(WaitUntil waitUntil, string registryName, AzureLocation location)
     {
         var registry = armClient.CreateRegistry(registryName);
         return Task.FromResult<IContainerRegistryResource>(new FakeContainerRegistryResource(armClient, registry.LoginServer));
