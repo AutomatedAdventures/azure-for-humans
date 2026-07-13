@@ -46,7 +46,7 @@ public class RealAppService(TokenCredential credentials) : IAppService
         var webApp = await resourceGroup.Resource.GetWebSites().CreateOrUpdateAsync(
                          WaitUntil.Completed, name, webAppData);
 
-        await AzureCloud.DeployZipFile(credentials, zipFilePath, name);
+        await ZipDeployer.Deploy(credentials, zipFilePath, name);
 
         await AzureCloud.WaitForAppServiceToBeReady(webApp.Value.Data.DefaultHostName);
 

@@ -66,7 +66,7 @@ public class RealFunctionService(TokenCredential credentials) : IFunctionService
         var functionApp = await resourceGroup.Resource.GetWebSites().CreateOrUpdateAsync(
                               WaitUntil.Completed, name, functionAppData);
 
-        await AzureCloud.DeployZipFile(credentials, zipFilePath, name);
+        await ZipDeployer.Deploy(credentials, zipFilePath, name);
 
         Console.WriteLine($"Function App '{functionApp.Value.Data.Name}' created successfully.");
 
