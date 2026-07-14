@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using Azure;
 using Azure.Core;
 using Azure.ResourceManager;
@@ -39,6 +41,8 @@ public class RealKeyVaultService(TokenCredential credentials) : IKeyVaultService
         var vaultProperties = new KeyVaultProperties(tenantId, new KeyVaultSku(KeyVaultSkuFamily.A, KeyVaultSkuName.Standard));
         vaultProperties.AccessPolicies.Add(new KeyVaultAccessPolicy(tenantId, identityPrincipalId.ToString(),
             new IdentityAccessPermissions { Secrets = { IdentityAccessSecretPermission.Get } }));
+        vaultProperties.AccessPolicies.Add(new KeyVaultAccessPolicy(tenantId, await GetDeployerPrincipalId(),
+            new IdentityAccessPermissions { Secrets = { IdentityAccessSecretPermission.Get, IdentityAccessSecretPermission.Set } }));
         var vault = await resourceGroup.Resource.GetKeyVaults()
             .CreateOrUpdateAsync(WaitUntil.Completed, vaultName, new KeyVaultCreateOrUpdateContent(location, vaultProperties));
         DeploymentLogger.Log($"Key Vault created with access policy for managed identity: {vault.Value.Data.Properties.VaultUri}");
@@ -55,6 +59,21 @@ public class RealKeyVaultService(TokenCredential credentials) : IKeyVaultService
     {
         var client = new SecretClient(new Uri(vaultUri), credentials);
         return (await client.GetSecretAsync(secretName)).Value.Value;
+    }
+
+    private async Task<string> GetDeployerPrincipalId()
+    {
+        var token = await credentials.GetTokenAsync(
+            new TokenRequestContext(["https://management.azure.com/.default"]), CancellationToken.None);
+        return DecodeJwtClaims(token.Token).GetProperty("oid").GetString()!;
+    }
+
+    private static JsonElement DecodeJwtClaims(string jwt)
+    {
+        string payload = jwt.Split('.')[1];
+        payload = payload.Replace('-', '+').Replace('_', '/');
+        payload = payload.PadRight(payload.Length + (4 - payload.Length % 4) % 4, '=');
+        return JsonDocument.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(payload))).RootElement;
     }
 }
 

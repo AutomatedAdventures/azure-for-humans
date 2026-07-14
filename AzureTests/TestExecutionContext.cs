@@ -116,7 +116,7 @@ public class RealExecutionContext : TestExecutionContext
     public override TimeProvider Time => TimeProvider.System;
 
     public override AzureCloud Azure() =>
-        new(location: AzureLocation.EastUS);
+        new(new[] { AzureLocation.EastUS, AzureLocation.WestEurope });
 
     public override HttpClient HttpClientFor(string url) =>
         new() { BaseAddress = BaseAddressFor(url) };
