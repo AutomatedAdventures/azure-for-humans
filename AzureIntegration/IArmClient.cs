@@ -44,6 +44,7 @@ public interface IContainerRegistryResource
 {
     string Id { get; }
     string LoginServer { get; }
+    Task<IContainerRegistryResource> Load();
     Task<IContainerRegistryCredentials> GetCredentialsAsync();
     Task<bool> Exists();
 }
@@ -129,6 +130,9 @@ internal class ContainerRegistryResourceAdapter(ContainerRegistryResource resour
 {
     public string Id => resource.Id.ToString();
     public string LoginServer => resource.Data.LoginServer;
+
+    public async Task<IContainerRegistryResource> Load() =>
+        new ContainerRegistryResourceAdapter((await resource.GetAsync()).Value);
 
     public async Task<IContainerRegistryCredentials> GetCredentialsAsync()
     {

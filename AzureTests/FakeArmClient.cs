@@ -48,7 +48,7 @@ public class FakeArmClient : IArmClient
     public IContainerRegistryResource GetContainerRegistryResource(ResourceIdentifier id)
     {
         string loginServer = id.ToString().Split('/').Last();
-        return new FakeContainerRegistryResource(this, loginServer);
+        return new FakeContainerRegistryResource(this, loginServer, loaded: false);
     }
 
     internal FakeRegistry CreateRegistry(string name)
@@ -132,14 +132,20 @@ internal class FakeContainerRegistryCollection(FakeArmClient armClient) : IConta
     public Task<IContainerRegistryResource> CreateOrUpdateAsync(WaitUntil waitUntil, string registryName, AzureLocation location)
     {
         var registry = armClient.CreateRegistry(registryName);
-        return Task.FromResult<IContainerRegistryResource>(new FakeContainerRegistryResource(armClient, registry.LoginServer));
+        return Task.FromResult<IContainerRegistryResource>(new FakeContainerRegistryResource(armClient, registry.LoginServer, loaded: true));
     }
 }
 
-internal class FakeContainerRegistryResource(FakeArmClient armClient, string loginServer) : IContainerRegistryResource
+internal class FakeContainerRegistryResource(FakeArmClient armClient, string loginServer, bool loaded) : IContainerRegistryResource
 {
     public string Id => $"/fake/registries/{loginServer}";
-    public string LoginServer => loginServer;
+
+    public string LoginServer => loaded
+        ? loginServer
+        : throw new InvalidOperationException("The current instance does not have data, you must call Get first.");
+
+    public Task<IContainerRegistryResource> Load() =>
+        Task.FromResult<IContainerRegistryResource>(new FakeContainerRegistryResource(armClient, loginServer, loaded: true));
 
     public Task<IContainerRegistryCredentials> GetCredentialsAsync() =>
         Task.FromResult<IContainerRegistryCredentials>(new FakeContainerRegistryCredentials());

@@ -284,7 +284,7 @@ public class AzureCloud
         }
 
         DeploymentLogger.Log($"Using existing Container Registry '{containerRegistryResourceId}'...");
-        var existingRegistry = _arm.GetContainerRegistryResource(new ResourceIdentifier(containerRegistryResourceId));
+        var existingRegistry = await _arm.GetContainerRegistryResource(new ResourceIdentifier(containerRegistryResourceId)).Load();
         DeploymentLogger.Log($"Using existing Container Registry server: {existingRegistry.LoginServer}");
         return existingRegistry;
     }
