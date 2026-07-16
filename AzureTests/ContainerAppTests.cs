@@ -232,12 +232,14 @@ public class ContainerAppTests
             environmentVariables: new Dictionary<string, string>
             {
                 { "KEY_VAULT_URI", keyVault.Uri },
-                { "KEY_VAULT_SECRET_NAME", "test-secret" }
+                { "KEY_VAULT_SECRET_NAME", "test-secret" },
+                { "AZURE_CLIENT_ID", identity.ClientId.ToString() }
             });
 
         using var client = context.HttpClientFor(containerApp.Url);
         var response = await client.GetAsync("/keyvault-secret");
         string retrievedSecret = await response.Content.ReadAsStringAsync();
+        TestContext.Out.WriteLine($"/keyvault-secret response ({(int)response.StatusCode}): {retrievedSecret}");
         Assert.That(retrievedSecret.Trim('"'), Is.EqualTo(secretValue),
             "A container app with a managed identity should read the Key Vault secret it was granted access to.");
     }

@@ -20,7 +20,14 @@ app.MapGet("/keyvault-secret", async (ContainerApp.ISecretReader secretReader) =
 {
     string keyVaultUri = app.Configuration["KEY_VAULT_URI"]!;
     string secretName = app.Configuration["KEY_VAULT_SECRET_NAME"]!;
-    return await secretReader.Read(keyVaultUri, secretName);
+    try
+    {
+        return Results.Ok(await secretReader.Read(keyVaultUri, secretName));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Failed to read secret '{secretName}' from '{keyVaultUri}': {ex}");
+    }
 });
 
 await app.RunAsync();
