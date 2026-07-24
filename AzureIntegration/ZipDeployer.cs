@@ -7,10 +7,10 @@ internal static class ZipDeployer
 {
     public static async Task Deploy(TokenCredential credentials, string zipFilePath, string serviceName)
     {
-        var httpClient = new HttpClient
-                         {
-                             Timeout = TimeSpan.FromMinutes(10)
-                         };
+        using var httpClient = new HttpClient
+                               {
+                                   Timeout = TimeSpan.FromMinutes(10)
+                               };
         string url = $"https://{serviceName.ToLower()}.scm.azurewebsites.net/api/zipdeploy";
         await using var fileStream = new FileStream(zipFilePath, FileMode.Open, FileAccess.Read);
         using var content = new StreamContent(fileStream);

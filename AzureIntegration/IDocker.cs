@@ -74,7 +74,7 @@ internal class ProcessDocker : IDocker
 
     private static async Task<(int exitCode, string error)> Execute(string arguments, string? workingDirectory = null)
     {
-        var process = new Process
+        using var process = new Process
         {
             StartInfo = new ProcessStartInfo
             {

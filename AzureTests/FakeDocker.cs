@@ -14,13 +14,14 @@ public class FakeDocker(FakeArmClient arm) : IDocker
 
     public Task Build(DirectoryInfo buildContext, string imageTag, string dockerfilePath, Dictionary<string, string>? buildArguments)
     {
-        string baseImage = ReadBaseImage(Path.Combine(buildContext.FullName, dockerfilePath));
+        string fullDockerfilePath = Path.Combine(buildContext.FullName, dockerfilePath);
+        string baseImage = ReadBaseImage(fullDockerfilePath);
         if (!baseImage.StartsWith("mcr.microsoft.com/", StringComparison.OrdinalIgnoreCase))
         {
             throw new Exception($"Docker build failed: base image '{baseImage}' could not be pulled.");
         }
 
-        string projectDirectory = Path.GetFileName(Path.GetDirectoryName(Path.Combine(buildContext.FullName, dockerfilePath)))!;
+        string projectDirectory = Path.GetFileName(Path.GetDirectoryName(fullDockerfilePath))!;
         arm.RecordImageProject(imageTag, projectDirectory);
         arm.RecordImageBuildArguments(imageTag, buildArguments ?? new());
         return Task.CompletedTask;
