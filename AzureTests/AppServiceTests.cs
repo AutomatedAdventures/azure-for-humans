@@ -8,10 +8,11 @@ public class AppServiceTests
     private static string GenerateAppServiceName() =>
         $"testappservice-{Guid.NewGuid().ToString("N")[..8]}";
 
-    [Test]
-    public async Task DeployAppService_WhenDeploymentFails_CleansUpResources()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployAppService_WhenDeploymentFails_CleansUpResources(TestExecutionContext context)
     {
-        var azure = new AzureCloud();
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string appServiceName = GenerateAppServiceName();
 
         var exception = Assert.ThrowsAsync<InvalidOperationException>(async () =>
@@ -27,24 +28,25 @@ public class AppServiceTests
             $"Resource group '{appServiceName}' should have been cleaned up after deployment failure");
     }
 
-    [Test]
-    public async Task DeployAppService()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployAppService(TestExecutionContext context)
     {
-        var azure = new AzureCloud();
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string appServiceName = GenerateAppServiceName();
         await using var app = await azure.DeployAppService(projectDirectory: "TestAppService", name: appServiceName);
-        using var client = new HttpClient();
-        client.BaseAddress = new Uri($"https://{appServiceName.ToLower()}.azurewebsites.net");
+        using var client = context.HttpClientFor(app.Url);
         var response = await client.GetAsync("/");
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         string content = await response.Content.ReadAsStringAsync();
         Assert.That(content, Is.EqualTo("TestAppService deployment successful!"));
     }
 
-    [Test]
-    public async Task DeployAppService_WithEnvironmentVariables()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployAppService_WithEnvironmentVariables(TestExecutionContext context)
     {
-        var azure = new AzureCloud();
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string appServiceName = GenerateAppServiceName();
         var envVars = new Dictionary<string, string>
                       {
@@ -56,8 +58,7 @@ public class AppServiceTests
                 projectDirectory: "TestAppService",
                 name: appServiceName,
                 environmentVariables: envVars);
-        using var client = new HttpClient();
-        client.BaseAddress = new Uri($"https://{appServiceName.ToLower()}.azurewebsites.net");
+        using var client = context.HttpClientFor(app.Url);
         foreach (var kvp in envVars)
         {
             var response = await client.GetAsync($"/variable/{kvp.Key}");

@@ -1,6 +1,5 @@
 ﻿using System.Diagnostics;
 using System.IO.Compression;
-using System.Net.Http.Headers;
 using Azure;
 using Azure.Core;
 using Azure.Identity;
@@ -9,8 +8,6 @@ using Azure.ResourceManager.AppContainers;
 using Azure.ResourceManager.AppContainers.Models;
 using Azure.ResourceManager.AppService;
 using Azure.ResourceManager.AppService.Models;
-using Azure.ResourceManager.ContainerRegistry;
-using Azure.ResourceManager.ContainerRegistry.Models;
 using Azure.ResourceManager.Resources;
 using Microsoft.Build.Evaluation;
 using Microsoft.Build.Framework;
@@ -22,9 +19,25 @@ namespace AzureIntegration;
 public class AzureCloud
 {
     private readonly TokenCredential _azureCredentials;
-    private readonly ArmClient _armClient;
-    private SubscriptionResource _subscription;
+    private readonly IArmClient _arm;
+    private readonly IDocker _docker;
+    private readonly IAppService _appService;
+    private readonly IFunctionService _functionService;
+    private readonly IContainerAppService _containerAppService;
+    private readonly IManagedIdentityService _managedIdentityService;
+    private readonly IKeyVaultService _keyVaultService;
+    private readonly IStorageService _storageService;
+    private readonly IAppServicePlanService _appServicePlanService;
+    private readonly IApplicationInsightsService _applicationInsightsService;
+    private readonly IReadOnlyList<AzureLocation> _locations;
     public AzureLocation Location { get; }
+
+    internal IDocker Docker => _docker;
+    internal IManagedIdentityService ManagedIdentityService => _managedIdentityService;
+    internal IKeyVaultService KeyVaultService => _keyVaultService;
+    internal IStorageService StorageService => _storageService;
+    internal IAppServicePlanService AppServicePlanService => _appServicePlanService;
+    internal IApplicationInsightsService ApplicationInsightsService => _applicationInsightsService;
 
     // Static lock and flag for MSBuild registration to ensure thread safety
     private static readonly object MsBuildLock = new();
@@ -37,53 +50,113 @@ public class AzureCloud
     {
     }
 
+    public AzureCloud(IEnumerable<AzureLocation> locations) : this(new DefaultAzureCredential())
+    {
+        var configuredLocations = locations.ToArray();
+        Location = configuredLocations.First();
+        _locations = configuredLocations;
+    }
+
+    public AzureCloud(IArmClient armClient, IEnumerable<AzureLocation> locations)
+        : this(armClient, new ProcessDocker(), locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IDocker docker, IEnumerable<AzureLocation> locations)
+        : this(armClient, new FailingAppService(), new FailingFunctionService(), new FailingContainerAppService(), docker, locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IAppService appService, IDocker docker, IEnumerable<AzureLocation> locations)
+        : this(armClient, appService, new FailingFunctionService(), new FailingContainerAppService(), docker, locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IDocker docker, IEnumerable<AzureLocation> locations)
+        : this(armClient, appService, functionService, new FailingContainerAppService(), docker, locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IContainerAppService containerAppService, IDocker docker, IEnumerable<AzureLocation> locations)
+        : this(armClient, appService, functionService, containerAppService, new FailingManagedIdentityService(), docker, locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IContainerAppService containerAppService, IManagedIdentityService managedIdentityService, IDocker docker, IEnumerable<AzureLocation> locations)
+        : this(armClient, appService, functionService, containerAppService, managedIdentityService, new FailingKeyVaultService(), docker, locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IContainerAppService containerAppService, IManagedIdentityService managedIdentityService, IKeyVaultService keyVaultService, IDocker docker, IEnumerable<AzureLocation> locations)
+        : this(armClient, appService, functionService, containerAppService, managedIdentityService, keyVaultService, new FailingStorageService(), docker, locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IContainerAppService containerAppService, IManagedIdentityService managedIdentityService, IKeyVaultService keyVaultService, IStorageService storageService, IDocker docker, IEnumerable<AzureLocation> locations)
+        : this(armClient, appService, functionService, containerAppService, managedIdentityService, keyVaultService, storageService, new FailingAppServicePlanService(), docker, locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IContainerAppService containerAppService, IManagedIdentityService managedIdentityService, IKeyVaultService keyVaultService, IStorageService storageService, IAppServicePlanService appServicePlanService, IDocker docker, IEnumerable<AzureLocation> locations)
+        : this(armClient, appService, functionService, containerAppService, managedIdentityService, keyVaultService, storageService, appServicePlanService, new FailingApplicationInsightsService(), docker, locations)
+    {
+    }
+
+    public AzureCloud(IArmClient armClient, IAppService appService, IFunctionService functionService, IContainerAppService containerAppService, IManagedIdentityService managedIdentityService, IKeyVaultService keyVaultService, IStorageService storageService, IAppServicePlanService appServicePlanService, IApplicationInsightsService applicationInsightsService, IDocker docker, IEnumerable<AzureLocation> locations)
+    {
+        _arm = armClient;
+        _appService = appService;
+        _functionService = functionService;
+        _containerAppService = containerAppService;
+        _managedIdentityService = managedIdentityService;
+        _keyVaultService = keyVaultService;
+        _storageService = storageService;
+        _appServicePlanService = appServicePlanService;
+        _applicationInsightsService = applicationInsightsService;
+        _docker = docker;
+        var configuredLocations = locations.ToArray();
+        Location = configuredLocations.First();
+        _locations = configuredLocations;
+        _azureCredentials = null!;
+    }
+
     public AzureCloud(TokenCredential credentials, AzureLocation? location = null)
     {
         _azureCredentials = credentials;
-        _armClient = new ArmClient(_azureCredentials);
-        _subscription = null!;
+        _arm = new ArmClientAdapter(new ArmClient(_azureCredentials));
+        _docker = new ProcessDocker();
+        _appService = new RealAppService(_azureCredentials);
+        _functionService = new RealFunctionService(_azureCredentials);
+        _containerAppService = new RealContainerAppService();
+        _managedIdentityService = new RealManagedIdentityService();
+        _keyVaultService = new RealKeyVaultService(_azureCredentials);
+        _storageService = new RealStorageService();
+        _appServicePlanService = new RealAppServicePlanService();
+        _applicationInsightsService = new RealApplicationInsightsService(_azureCredentials);
         Location = location ?? AzureLocation.WestEurope;
+        _locations = new[] { Location };
     }
 
-    internal async Task<SubscriptionResource> GetSubscriptionAsync()
-    {
-        if (_subscription == null)
-        {
-            try
-            {
-                _subscription = await _armClient.GetDefaultSubscriptionAsync();
-            }
-            catch (AuthenticationFailedException)
-            {
-                throw new AuthenticationFailedException("Invalid credentials provided. Please check your client ID, client secret, and tenant ID.");
-            }
-            catch (Exception ex) when (ex.InnerException is AuthenticationFailedException)
-            {
-                throw new AuthenticationFailedException("Invalid credentials provided. Please check your client ID, client secret, and tenant ID.");
-            }
-        }
-        return _subscription;
-    }
 
-    public async Task<ResourceGroup> CreateResourceGroup(string name)
-    {
-        var subscription = await GetSubscriptionAsync();
-        var resourceGroupData = new ResourceGroupData(Location);
-        var operationResult = await subscription.GetResourceGroups().CreateOrUpdateAsync(WaitUntil.Completed, name, resourceGroupData);
-        return new ResourceGroup(operationResult.Value, this);
-    }
+    public Task<ResourceGroup> CreateResourceGroup(string name) =>
+        CreateResourceGroupIn(name, Location);
 
     public async Task DeleteResourceGroup(string name)
     {
-        var subscription = await GetSubscriptionAsync();
-        var resourceGroup = (await subscription.GetResourceGroups().GetAsync(name)).Value;
+        var subscription = await _arm.GetDefaultSubscriptionAsync();
+        var resourceGroup = await subscription.GetResourceGroups().GetAsync(name);
         await resourceGroup.DeleteAsync(WaitUntil.Completed);
     }
 
     public async Task<bool> ResourceGroupExists(string name)
     {
-        var subscription = await GetSubscriptionAsync();
+        var subscription = await _arm.GetDefaultSubscriptionAsync();
         return await subscription.GetResourceGroups().ExistsAsync(name);
+    }
+
+    public async Task<bool> ContainerRegistryExists(string resourceId)
+    {
+        return await _arm.GetContainerRegistryResource(new ResourceIdentifier(resourceId)).Exists();
     }
 
     public async Task<AzureFunction> DeployAzureFunction(
@@ -91,47 +164,11 @@ public class AzureCloud
     {
         string zipFilePath = CreateDeploymentZipFile(projectDirectory, name);
         var resourceGroup = await CreateResourceGroup(name);
-        
+
         try
         {
-            var storageAccount = await resourceGroup.CreateStorageAccount(name);
-            var appServicePlan = await resourceGroup.CreateAppServicePlanForFunctionApp(name);
-            var applicationInsights = await resourceGroup.CreateApplicationInsights(name);
-
-            var appSettings = new List<AppServiceNameValuePair>
-                              {
-                                  new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") },
-                                  new() { Name = "AzureWebJobsStorage", Value = storageAccount.ConnectionString },
-                                  new() { Name = "WEBSITE_RUN_FROM_PACKAGE", Value = "1" },
-                                  new() { Name = "FUNCTIONS_EXTENSION_VERSION", Value = "~4" },
-                                  new() { Name = "FUNCTIONS_WORKER_RUNTIME", Value = "dotnet-isolated" },
-                                  new() { Name = "SCM_DO_BUILD_DURING_DEPLOYMENT", Value = "0" },
-                                  new() { Name = "WEBSITE_USE_PLACEHOLDER_DOTNETISOLATED", Value = "1" },
-                                  new() { Name = "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING", Value = storageAccount.ConnectionString },
-                                  new() { Name = "WEBSITE_CONTENTSHARE", Value = name.ToLower() },
-                                  new() { Name = "APPLICATIONINSIGHTS_CONNECTION_STRING", Value = applicationInsights.ConnectionString },
-                                  new() { Name = "ApplicationInsightsAgent_EXTENSION_VERSION", Value = "~3" }
-                              };
-            appSettings = AddEnvironmentVariablesToAppSettings(appSettings, environmentVariables);
-            var functionAppData = new WebSiteData(resourceGroup.Resource.Data.Location)
-                                  {
-                                      AppServicePlanId = appServicePlan.Id,
-                                      Kind = "functionapp,linux",
-                                      SiteConfig = new SiteConfigProperties
-                                                   {
-                                                       AppSettings = appSettings,
-                                                       LinuxFxVersion = "DOTNET-ISOLATED|8.0",
-                                                   }
-                                  };
-
-            var functionApp = await resourceGroup.Resource.GetWebSites().CreateOrUpdateAsync(
-                                  WaitUntil.Completed, name, functionAppData);
-
-            await DeployZipFile(zipFilePath, name);
-
-            Console.WriteLine($"Function App '{functionApp.Value.Data.Name}' created successfully.");
-
-            return new AzureFunction(functionApp.Value, applicationInsights, resourceGroup.Resource.Data.Name, this);
+            var deployment = await _functionService.Deploy(resourceGroup, name, projectDirectory, environmentVariables, zipFilePath);
+            return new AzureFunction(name, deployment.Host, deployment.Logs, resourceGroup.Name, this);
         }
         catch (Exception)
         {
@@ -144,37 +181,11 @@ public class AzureCloud
     {
         string zipFilePath = CreateDeploymentZipFile(projectDirectory, name);
         var resourceGroup = await CreateResourceGroup(name);
-        
+
         try
         {
-            // Create App Service Plan specifically for web apps using the dedicated method
-            string appServicePlanName = $"{name.ToLower()}-plan-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
-            var appServicePlan = await resourceGroup.CreateAppServicePlanForWebApp(appServicePlanName);
-
-            var appSettings = new List<AppServiceNameValuePair>
-                              {
-                                  new() { Name = "DEPLOYMENT_DATE", Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") }
-                              };
-            appSettings = AddEnvironmentVariablesToAppSettings(appSettings, environmentVariables);
-            var webAppData = new WebSiteData(resourceGroup.Resource.Data.Location)
-                             {
-                                 AppServicePlanId = appServicePlan.Id,
-                                 Kind = "app,linux",
-                                 SiteConfig = new SiteConfigProperties
-                                              {
-                                                  AppSettings = appSettings,
-                                                  LinuxFxVersion = "DOTNETCORE|8.0"
-                                              }
-                             };
-            var webApp = await resourceGroup.Resource.GetWebSites().CreateOrUpdateAsync(
-                             WaitUntil.Completed, name, webAppData);
-
-            await DeployZipFile(zipFilePath, name);
-
-            // Wait for the App Service to be ready to receive HTTP requests
-            await WaitForAppServiceToBeReady(webApp.Value.Data.DefaultHostName);
-
-            return new AzureWebApp(webApp.Value, resourceGroup.Resource.Data.Name, this);
+            string hostName = await _appService.Deploy(resourceGroup, name, projectDirectory, environmentVariables, zipFilePath);
+            return new AzureWebApp(name, hostName, resourceGroup.Name, this);
         }
         catch (Exception)
         {
@@ -193,55 +204,89 @@ public class AzureCloud
         Guid identityPrincipalId)
         => AzureKeyVault.CreateAsync(this, resourceGroupName, secretName, secretValue, identityPrincipalId);
 
+    public Task<ContainerRegistry> CreateContainerRegistry(string resourceGroupName, string registryName)
+        => ContainerRegistry.CreateAsync(this, resourceGroupName, registryName);
+
     public async Task<AzureContainerApp> DeployContainerApp(
         string projectDirectory,
         string name,
         Dictionary<string, string>? environmentVariables = null,
         string? workspaceRoot = null,
         Dictionary<string, string>? dockerBuildArguments = null,
-        string? managedIdentityResourceId = null)
+        string? managedIdentityResourceId = null,
+        string? containerRegistryResourceId = null)
     {
         DeploymentLogger.Start($"Starting Container App deployment: {name}");
 
         (var buildContext, var projectDir) = ProjectPathResolver.GetBuildContextPaths(projectDirectory, workspaceRoot);
 
-        var resourceGroup = await CreateResourceGroup(name);
-
-        try
+        RequestFailedException? lastCapacityError = null;
+        foreach (var location in _locations)
         {
-            var acr = await CreateContainerRegistry(resourceGroup, name);
+            var resourceGroup = await CreateResourceGroupIn(name, location);
 
-            string imageName = await BuildAndPushImage(projectDir, buildContext, acr, name, dockerBuildArguments);
+            try
+            {
+                var acr = await ResolveContainerRegistry(resourceGroup, name, containerRegistryResourceId);
 
-            var applicationInsights = await resourceGroup.CreateApplicationInsights(name);
-            var environment = await CreateContainerAppsEnvironment(resourceGroup, name);
-            var containerApp = await CreateContainerApp(resourceGroup, environment, acr, name, imageName, environmentVariables, applicationInsights, managedIdentityResourceId);
+                string imageName = await BuildAndPushImage(projectDir, buildContext, acr, name, dockerBuildArguments);
 
-            DeploymentLogger.Log($"Deployment complete: {containerApp.Url}");
-            return containerApp;
+                var deployment = await _containerAppService.Deploy(resourceGroup, name, imageName, acr, environmentVariables, managedIdentityResourceId);
+
+                DeploymentLogger.Log($"Deployment complete: https://{deployment.Fqdn}");
+                return new AzureContainerApp(name, deployment.Fqdn, resourceGroup.Name, this, deployment.Logs);
+            }
+            catch (RequestFailedException ex) when (ex.ErrorCode == "AKSCapacityHeavyUsage")
+            {
+                lastCapacityError = ex;
+                DeploymentLogger.Log($"Region '{location}' has no capacity, trying the next configured region...");
+                await DeleteResourceGroup(name);
+            }
+            catch (Exception ex)
+            {
+                DeploymentLogger.LogError($"Deployment failed: {ex.Message}. Cleaning up resources...");
+                await DeleteResourceGroup(name);
+                throw;
+            }
         }
-        catch (Exception ex)
-        {
-            DeploymentLogger.LogError($"Deployment failed: {ex.Message}. Cleaning up resources...");
-            await DeleteResourceGroup(name);
-            throw;
-        }
+
+        throw lastCapacityError!;
     }
 
-    private async Task<ContainerRegistryResource> CreateContainerRegistry(ResourceGroup resourceGroup, string name)
+    private async Task<ResourceGroup> CreateResourceGroupIn(string name, AzureLocation location)
+    {
+        var subscription = await _arm.GetDefaultSubscriptionAsync();
+        var createdResourceGroup = await subscription.GetResourceGroups()
+            .CreateOrUpdateAsync(WaitUntil.Completed, name, new ResourceGroupData(location));
+        return new ResourceGroup(createdResourceGroup.Concrete!, this) { SeamResource = createdResourceGroup };
+    }
+
+    private async Task<IContainerRegistryResource> CreateContainerRegistry(ResourceGroup resourceGroup, string name)
     {
         string acrName = SanitizeAcrName(name);
         DeploymentLogger.Log($"Creating Container Registry '{acrName}'...");
 
-        var acrData = new ContainerRegistryData(Location, new ContainerRegistrySku(ContainerRegistrySkuName.Basic))
+        var acr = await resourceGroup.SeamResource!.GetContainerRegistries()
+            .CreateOrUpdateAsync(WaitUntil.Completed, acrName, Location);
+
+        DeploymentLogger.Log($"Container Registry created: {acr.LoginServer}");
+        return acr;
+    }
+
+    private async Task<IContainerRegistryResource> ResolveContainerRegistry(
+        ResourceGroup resourceGroup,
+        string name,
+        string? containerRegistryResourceId)
+    {
+        if (string.IsNullOrWhiteSpace(containerRegistryResourceId))
         {
-            IsAdminUserEnabled = true
-        };
-        var acr = await resourceGroup.Resource.GetContainerRegistries()
-            .CreateOrUpdateAsync(WaitUntil.Completed, acrName, acrData);
-        
-        DeploymentLogger.Log($"Container Registry created: {acr.Value.Data.LoginServer}");
-        return acr.Value;
+            return await CreateContainerRegistry(resourceGroup, name);
+        }
+
+        DeploymentLogger.Log($"Using existing Container Registry '{containerRegistryResourceId}'...");
+        var existingRegistry = await _arm.GetContainerRegistryResource(new ResourceIdentifier(containerRegistryResourceId)).Load();
+        DeploymentLogger.Log($"Using existing Container Registry server: {existingRegistry.LoginServer}");
+        return existingRegistry;
     }
 
     private static string SanitizeAcrName(string name)
@@ -250,18 +295,16 @@ public class AzureCloud
         return acrName.Length > 50 ? acrName[..50] : acrName;
     }
 
-    private static async Task<string> BuildAndPushImage(DirectoryInfo projectDir, DirectoryInfo buildContext, ContainerRegistryResource acr, string name, Dictionary<string, string>? dockerBuildArguments)
+    private async Task<string> BuildAndPushImage(DirectoryInfo projectDir, DirectoryInfo buildContext, IContainerRegistryResource acr, string name, Dictionary<string, string>? dockerBuildArguments)
     {
         var credentials = await acr.GetCredentialsAsync();
-        string loginServer = acr.Data.LoginServer;
-        string username = credentials.Value.Username;
-        string password = credentials.Value.Passwords.First().Value;
+        string loginServer = acr.LoginServer;
 
-        await BuildAndPushDockerImage(projectDir, buildContext, loginServer, username, password, name.ToLower(), dockerBuildArguments);
+        await BuildAndPushDockerImage(projectDir, buildContext, loginServer, credentials.Username, credentials.Password, name.ToLower(), dockerBuildArguments);
         return $"{loginServer}/{name.ToLower()}:latest";
     }
 
-    private static async Task BuildAndPushDockerImage(
+    private async Task BuildAndPushDockerImage(
         DirectoryInfo projectDir,
         DirectoryInfo buildContext,
         string acrLoginServer,
@@ -270,323 +313,17 @@ public class AzureCloud
         string imageName,
         Dictionary<string, string>? dockerBuildArguments)
     {
-        await VerifyDockerAvailable();
-        await DockerLogin(acrLoginServer, acrUsername, acrPassword);
+        await _docker.Verify();
+        await _docker.Login(acrLoginServer, acrUsername, acrPassword);
 
         string imageTag = $"{acrLoginServer}/{imageName}:latest";
         string dockerfilePath = Path.GetRelativePath(buildContext.FullName, Path.Combine(projectDir.FullName, "Dockerfile"))
             .Replace('\\', '/');
-        await DockerBuild(buildContext, imageTag, dockerfilePath, dockerBuildArguments);
-        await DockerPush(imageTag);
+        await _docker.Build(buildContext, imageTag, dockerfilePath, dockerBuildArguments);
+        await _docker.Push(imageTag);
     }
 
-    private static async Task VerifyDockerAvailable()
-    {
-        DeploymentLogger.Log("Verifying Docker availability...");
-        var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = "version --format '{{.Server.Os}}'",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-        process.Start();
-        string output = await process.StandardOutput.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        
-        if (process.ExitCode != 0)
-        {
-            string error = await process.StandardError.ReadToEndAsync();
-            throw new Exception($"Docker is not available or not running: {error}");
-        }
-        DeploymentLogger.Log($"Docker available (OS: {output.Trim()})");
-    }
-
-    private static async Task DockerLogin(string server, string username, string password)
-    {
-        DeploymentLogger.Log($"Logging into ACR {server}...");
-        var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = $"login {server} -u {username} -p {password}",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-        process.Start();
-        string error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        
-        if (process.ExitCode != 0)
-        {
-            throw new Exception($"Docker login failed: {error}");
-        }
-        DeploymentLogger.Log("Docker login successful");
-    }
-
-    private static async Task DockerBuild(DirectoryInfo buildContext, string imageTag, string dockerfilePath, Dictionary<string, string>? dockerBuildArguments)
-    {
-        DeploymentLogger.Log($"Building Docker image {imageTag}...");
-        string buildArgsString = dockerBuildArguments is { Count: > 0 }
-            ? string.Join(" ", dockerBuildArguments.Select(a => $"--build-arg {a.Key}={a.Value}"))
-            : string.Empty;
-        var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = $"build --platform linux/amd64 -t {imageTag} -f {dockerfilePath} {buildArgsString} .",
-                WorkingDirectory = buildContext.FullName,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-        process.Start();
-        
-        var errorTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        string error = await errorTask;
-        
-        if (process.ExitCode != 0)
-        {
-            DeploymentLogger.LogError($"Docker build failed: {error}");
-            throw new Exception($"Docker build failed with exit code {process.ExitCode}: {error}");
-        }
-        DeploymentLogger.Log("Docker build completed");
-    }
-
-    private static async Task DockerPush(string imageTag)
-    {
-        DeploymentLogger.Log("Pushing Docker image...");
-        var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = $"push {imageTag}",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-        process.Start();
-        
-        var errorTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        string error = await errorTask;
-        
-        if (process.ExitCode != 0)
-        {
-            DeploymentLogger.LogError($"Docker push failed: {error}");
-            throw new Exception($"Docker push failed with exit code {process.ExitCode}: {error}");
-        }
-        DeploymentLogger.Log("Docker image pushed successfully");
-    }
-
-    private static ContainerAppContainer BuildContainer(
-        string name, 
-        string imageName, 
-        Dictionary<string, string>? environmentVariables)
-    {
-        var container = new ContainerAppContainer
-        {
-            Name = name.ToLower(),
-            Image = imageName,
-            Resources = new AppContainerResources { Cpu = 0.5, Memory = "1Gi" }
-        };
-
-        container.Env.Add(new ContainerAppEnvironmentVariable 
-        { 
-            Name = "DEPLOYMENT_DATE", 
-            Value = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") 
-        });
-        container.Env.Add(new ContainerAppEnvironmentVariable 
-        { 
-            Name = "ASPNETCORE_URLS", 
-            Value = "http://+:8080" 
-        });
-
-        if (environmentVariables != null)
-        {
-            foreach (var kvp in environmentVariables)
-            {
-                container.Env.Add(new ContainerAppEnvironmentVariable { Name = kvp.Key, Value = kvp.Value });
-            }
-        }
-
-        return container;
-    }
-
-    private async Task<ContainerAppManagedEnvironmentResource> CreateContainerAppsEnvironment(ResourceGroup resourceGroup, string name)
-    {
-        string environmentName = $"{name}-env";
-        DeploymentLogger.Log($"Creating Container Apps Environment '{environmentName}'...");
-        
-        var environmentData = new ContainerAppManagedEnvironmentData(Location);
-        var environment = await resourceGroup.Resource.GetContainerAppManagedEnvironments()
-            .CreateOrUpdateAsync(WaitUntil.Completed, environmentName, environmentData);
-
-        DeploymentLogger.Log("Container Apps Environment created");
-        return environment.Value;
-    }
-
-    private async Task<AzureContainerApp> CreateContainerApp(
-        ResourceGroup resourceGroup,
-        ContainerAppManagedEnvironmentResource environment,
-        ContainerRegistryResource acr,
-        string name,
-        string imageName,
-        Dictionary<string, string>? environmentVariables,
-        ApplicationInsights applicationInsights,
-        string? managedIdentityResourceId = null)
-    {
-        DeploymentLogger.Log($"Creating Container App '{name}'...");
-
-        var credentials = await acr.GetCredentialsAsync();
-        var appiEnvVars = new Dictionary<string, string>
-        {
-            { "APPLICATIONINSIGHTS_CONNECTION_STRING", applicationInsights.ConnectionString }
-        };
-        var mergedEnvVars = environmentVariables == null
-            ? appiEnvVars
-            : appiEnvVars.Concat(environmentVariables).ToDictionary(k => k.Key, v => v.Value);
-        var container = BuildContainer(name, imageName, mergedEnvVars);
-        
-        var containerAppData = new ContainerAppData(Location)
-        {
-            ManagedEnvironmentId = environment.Id,
-            Configuration = new ContainerAppConfiguration
-            {
-                Ingress = new ContainerAppIngressConfiguration
-                {
-                    External = true,
-                    TargetPort = 8080,
-                    Transport = ContainerAppIngressTransportMethod.Auto
-                },
-                Registries =
-                {
-                    new ContainerAppRegistryCredentials
-                    {
-                        Server = acr.Data.LoginServer,
-                        Username = credentials.Value.Username,
-                        PasswordSecretRef = "acr-password"
-                    }
-                },
-                Secrets =
-                {
-                    new ContainerAppWritableSecret 
-                    { 
-                        Name = "acr-password", 
-                        Value = credentials.Value.Passwords.First().Value 
-                    }
-                }
-            },
-            Template = new ContainerAppTemplate
-            {
-                Containers = { container },
-                Scale = new ContainerAppScale { MinReplicas = 1, MaxReplicas = 1 }
-            }
-        };
-
-        if (managedIdentityResourceId != null)
-        {
-            containerAppData.Identity = new Azure.ResourceManager.Models.ManagedServiceIdentity(
-                Azure.ResourceManager.Models.ManagedServiceIdentityType.UserAssigned);
-            containerAppData.Identity.UserAssignedIdentities.Add(
-                new ResourceIdentifier(managedIdentityResourceId),
-                new Azure.ResourceManager.Models.UserAssignedIdentity());
-        }
-
-        var containerApp = await resourceGroup.Resource.GetContainerApps()
-            .CreateOrUpdateAsync(WaitUntil.Completed, name, containerAppData);
-
-        string fqdn = containerApp.Value.Data.Configuration.Ingress.Fqdn;
-        DeploymentLogger.Log("Container App created, waiting for readiness...");
-        
-        await WaitForContainerAppToBeReady(fqdn);
-
-        return new AzureContainerApp(containerApp.Value.Data.Name, fqdn, resourceGroup.Resource.Data.Name, this, applicationInsights);
-    }
-
-    private static async Task WaitForContainerAppToBeReady(string fqdn, int timeoutMinutes = 10, int intervalSeconds = 30)
-    {
-        string appUrl = $"https://{fqdn}";
-        var timeout = TimeSpan.FromMinutes(timeoutMinutes);
-        var interval = TimeSpan.FromSeconds(intervalSeconds);
-        var stopwatch = Stopwatch.StartNew();
-
-        DeploymentLogger.Log($"Waiting for Container App at {appUrl}...");
-
-        using var httpClient = new HttpClient();
-        httpClient.Timeout = TimeSpan.FromSeconds(30);
-
-        while (stopwatch.Elapsed < timeout)
-        {
-            try
-            {
-                var response = await httpClient.GetAsync(appUrl);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    DeploymentLogger.Log($"Container App ready (Status: {response.StatusCode})");
-                    return;
-                }
-
-                DeploymentLogger.Log($"Not ready yet (Status: {response.StatusCode})");
-            }
-            catch (Exception ex)
-            {
-                DeploymentLogger.Log($"Not ready yet ({ex.Message})");
-            }
-
-            if (stopwatch.Elapsed + interval < timeout)
-            {
-                await Task.Delay(interval);
-            }
-        }
-
-        throw new TimeoutException($"Container App at {appUrl} did not become ready within {timeoutMinutes} minutes");
-    }
-
-
-    private async Task DeployZipFile(string zipFilePath, string serviceName)
-    {
-        var httpClient = new HttpClient
-                         {
-                             Timeout = TimeSpan.FromMinutes(10)
-                         };
-        string url = $"https://{serviceName.ToLower()}.scm.azurewebsites.net/api/zipdeploy";
-        await using var fileStream = new FileStream(zipFilePath, FileMode.Open, FileAccess.Read);
-        using var content = new StreamContent(fileStream);
-        content.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
-        var accessToken = await _azureCredentials.GetTokenAsync(new TokenRequestContext(["https://management.azure.com/.default"]), CancellationToken.None);
-        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
-
-        Console.WriteLine($"Deploying zip file to {serviceName}...");
-        var response = await httpClient.PostAsync(url, content);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            string errorContent = await response.Content.ReadAsStringAsync();
-            throw new Exception($"Deployment failed for {serviceName}: {response.StatusCode} {errorContent}");
-        }
-
-        Console.WriteLine($"Zip file deployed successfully to {serviceName}");
-    }
-
-    private static List<AppServiceNameValuePair> AddEnvironmentVariablesToAppSettings(
+    internal static List<AppServiceNameValuePair> AddEnvironmentVariablesToAppSettings(
         List<AppServiceNameValuePair> baseSettings,
         Dictionary<string, string>? environmentVariables)
     {
@@ -605,7 +342,7 @@ public class AzureCloud
         return appSettings;
     }
 
-    private static async Task WaitForAppServiceToBeReady(string hostName, int timeoutMinutes = 10, int intervalSeconds = 30)
+    internal static async Task WaitForAppServiceToBeReady(string hostName, int timeoutMinutes = 10, int intervalSeconds = 30)
     {
         string appUrl = $"https://{hostName}";
         var timeout = TimeSpan.FromMinutes(timeoutMinutes);
@@ -755,23 +492,13 @@ public class AzureCloud
 
     public async Task<IEnumerable<ResourceGroup>> GetResourceGroups()
     {
-        var subscription = await GetSubscriptionAsync();
+        var subscription = await _arm.GetDefaultSubscriptionAsync();
         var resourceGroups = new List<ResourceGroup>();
-        await foreach (var resourceGroup in subscription.GetResourceGroups().GetAllAsync())
+        foreach (var resourceGroup in await subscription.GetResourceGroups().GetAllAsync())
         {
-            resourceGroups.Add(new ResourceGroup(resourceGroup, this));
+            resourceGroups.Add(new ResourceGroup(resourceGroup.Concrete!, this) { SeamResource = resourceGroup });
         }
 
         return resourceGroups;
-    }
-
-    public ArmClient GetArmClient()
-    {
-        return _armClient;
-    }
-
-    public TokenCredential GetCredential()
-    {
-        return _azureCredentials;
     }
 }

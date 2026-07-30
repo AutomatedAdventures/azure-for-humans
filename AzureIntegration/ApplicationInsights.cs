@@ -3,11 +3,10 @@ using Azure.Monitor.Query.Models;
 
 namespace AzureIntegration;
 
-public record ApplicationInsights
+public record ApplicationInsights : IApplicationLogs
 {
     private readonly string _workspaceId;
     private readonly LogsQueryClient _logsQueryClient;
-
     public ApplicationInsights(string workspaceId, LogsQueryClient logsQueryClient, string connectionString)
     {
         _workspaceId = workspaceId;

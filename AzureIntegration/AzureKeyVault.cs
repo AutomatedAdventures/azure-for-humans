@@ -1,7 +1,3 @@
-using Azure;
-using Azure.ResourceManager.KeyVault;
-using Azure.ResourceManager.KeyVault.Models;
-
 namespace AzureIntegration;
 
 public class AzureKeyVault(string uri, string resourceGroupName, AzureCloud azureCloud) : IAsyncDisposable
@@ -16,25 +12,14 @@ public class AzureKeyVault(string uri, string resourceGroupName, AzureCloud azur
         Guid identityPrincipalId)
     {
         DeploymentLogger.Log($"Creating Key Vault in resource group '{resourceGroupName}'...");
-        var subscription = await azureCloud.GetSubscriptionAsync();
         var resourceGroup = await azureCloud.CreateResourceGroup(resourceGroupName);
-        var tenantId = (await subscription.GetAsync()).Value.Data.TenantId!.Value;
-
-        string vaultName = $"kv-{resourceGroupName.Replace("-", "")[..Math.Min(18, resourceGroupName.Replace("-", "").Length)]}";
-        var vaultProperties = new KeyVaultProperties(tenantId, new KeyVaultSku(KeyVaultSkuFamily.A, KeyVaultSkuName.Standard));
-        vaultProperties.AccessPolicies.Add(new KeyVaultAccessPolicy(tenantId, identityPrincipalId.ToString(),
-            new IdentityAccessPermissions { Secrets = { IdentityAccessSecretPermission.Get } }));
-        var vault = await resourceGroup.Resource.GetKeyVaults()
-            .CreateOrUpdateAsync(WaitUntil.Completed, vaultName, new KeyVaultCreateOrUpdateContent(azureCloud.Location, vaultProperties));
-        DeploymentLogger.Log($"Key Vault created with access policy for managed identity: {vault.Value.Data.Properties.VaultUri}");
-
-        await vault.Value.GetKeyVaultSecrets().CreateOrUpdateAsync(
-            WaitUntil.Completed, secretName,
-            new KeyVaultSecretCreateOrUpdateContent(new SecretProperties { Value = secretValue }));
-        DeploymentLogger.Log($"Secret '{secretName}' stored in Key Vault");
-
-        return new AzureKeyVault(vault.Value.Data.Properties.VaultUri!.ToString(), resourceGroupName, azureCloud);
+        var deployment = await azureCloud.KeyVaultService.Create(
+            resourceGroup, resourceGroupName, secretName, secretValue, identityPrincipalId, azureCloud.Location);
+        return new AzureKeyVault(deployment.Uri, resourceGroupName, azureCloud);
     }
+
+    public Task<string> ReadSecret(string secretName) =>
+        azureCloud.KeyVaultService.ReadSecret(uri, secretName);
 
     public async ValueTask DisposeAsync()
     {

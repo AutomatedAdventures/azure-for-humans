@@ -1,6 +1,6 @@
 namespace AzureIntegration;
 
-public class AzureContainerApp(string name, string fqdn, string resourceGroupName, AzureCloud azureCloud, ApplicationInsights applicationInsights) : IAsyncDisposable
+public class AzureContainerApp(string name, string fqdn, string resourceGroupName, AzureCloud azureCloud, IApplicationLogs applicationInsights) : IAsyncDisposable
 {
     public string Name => name;
     public string Fqdn => fqdn;

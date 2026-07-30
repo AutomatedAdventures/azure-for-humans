@@ -24,4 +24,11 @@ public class AzureCloudRegionTests
     {
         Assert.DoesNotThrow(() => new AzureCloud());
     }
+
+    [Test]
+    public void WhenSeveralRegionsAreConfigured_TheFirstOneIsUsed()
+    {
+        var azure = new AzureCloud(locations: new[] { AzureLocation.EastUS, AzureLocation.WestEurope });
+        Assert.That(azure.Location, Is.EqualTo(AzureLocation.EastUS));
+    }
 }

@@ -2,10 +2,10 @@ using Azure.ResourceManager.AppService;
 
 namespace AzureIntegration;
 
-public class AzureWebApp(WebSiteResource webApp, string resourceGroupName, AzureCloud azureCloud) : IAsyncDisposable
+public class AzureWebApp(string name, string url, string resourceGroupName, AzureCloud azureCloud) : IAsyncDisposable
 {
-    public string Name => webApp.Data.Name;
-    public string Url => webApp.Data.DefaultHostName;
+    public string Name => name;
+    public string Url => url;
 
     public async ValueTask DisposeAsync()
     {

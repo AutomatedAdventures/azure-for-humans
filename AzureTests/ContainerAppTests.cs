@@ -9,10 +9,11 @@ public class ContainerAppTests
     private static string GenerateContainerAppName() =>
         $"testcontainerapp-{Guid.NewGuid().ToString("N")[..8]}";
 
-    [Test]
-    public async Task DeployContainerApp_WhenDeploymentFails_CleansUpResources()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp_WhenDeploymentFails_CleansUpResources(TestExecutionContext context)
     {
-        var azure = new AzureCloud();
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string containerAppName = GenerateContainerAppName();
 
         Assert.ThrowsAsync<Exception>(async () =>
@@ -25,10 +26,11 @@ public class ContainerAppTests
             $"Resource group '{containerAppName}' should have been cleaned up after deployment failure");
     }
 
-    [Test, Category("LongRunning")]
-    public async Task DeployContainerApp_WhenCallerProjectIsAtSolutionRoot_DeploysSuccessfully()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp_WhenCallerProjectIsAtSolutionRoot_DeploysSuccessfully(TestExecutionContext context)
     {
-        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string containerAppName = GenerateContainerAppName();
         string workingDirectory = Path.Combine("TestContainerAppWithProjectDependencies", "CallerProject", "bin", "Debug", "net8.0");
 
@@ -40,7 +42,7 @@ public class ContainerAppTests
                 workspaceRoot: ".");
 
             await AssertResourceGroupExists(azure, containerAppName);
-            using var client = new HttpClient { BaseAddress = new Uri(containerApp.Url) };
+            using var client = context.HttpClientFor(containerApp.Url);
             var response = await client.GetAsync("/");
             Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
             string content = await response.Content.ReadAsStringAsync();
@@ -49,10 +51,11 @@ public class ContainerAppTests
     }
 
 
-    [Test, Category("LongRunning")]
-    public async Task DeployContainerApp_WithProjectDependencies()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp_WithProjectDependencies(TestExecutionContext context)
     {
-        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string containerAppName = GenerateContainerAppName();
 
         await using var containerApp = await azure.DeployContainerApp(
@@ -61,17 +64,18 @@ public class ContainerAppTests
             workspaceRoot: "TestContainerAppWithProjectDependencies");
 
         await AssertResourceGroupExists(azure, containerAppName);
-        using var client = new HttpClient { BaseAddress = new Uri(containerApp.Url) };
+        using var client = context.HttpClientFor(containerApp.Url);
         var response = await client.GetAsync("/");
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         string content = await response.Content.ReadAsStringAsync();
         Assert.That(content, Is.EqualTo("TestContainerAppWithProjectDependencies deployment successful!"));
     }
 
-    [Test, Category("LongRunning")]
-    public async Task DeployContainerApp_WithDockerBuildArguments()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp_WithDockerBuildArguments(TestExecutionContext context)
     {
-        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string containerAppName = GenerateContainerAppName();
         var buildArgs = new Dictionary<string, string>
                         {
@@ -84,17 +88,18 @@ public class ContainerAppTests
             dockerBuildArguments: buildArgs);
 
         await AssertResourceGroupExists(azure, containerAppName);
-        using var client = new HttpClient { BaseAddress = new Uri(containerApp.Url) };
+        using var client = context.HttpClientFor(containerApp.Url);
         var response = await client.GetAsync("/variable/APP_GREETING");
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         string value = await response.Content.ReadAsStringAsync();
         Assert.That(value.Trim('"'), Is.EqualTo("hello-from-build-arg"));
     }
 
-    [Test]
-    public async Task DeployContainerApp()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp(TestExecutionContext context)
     {
-        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string containerAppName = GenerateContainerAppName();
         var envVars = new Dictionary<string, string>
                       {
@@ -108,49 +113,50 @@ public class ContainerAppTests
             environmentVariables: envVars);
 
         await AssertResourceGroupExists(azure, containerAppName);
-        await AssertContainerAppRespondsWithExpectedContent(containerApp);
-        await AssertEnvironmentVariablesAreAccessible(containerApp, envVars);
-        await AssertLogsAppearInApplicationInsights(containerApp);
-        await AssertLogsAppearInApplicationInsightsWithCustomKqlQuery(containerApp);
+        await AssertContainerAppRespondsWithExpectedContent(context, containerApp);
+        await AssertEnvironmentVariablesAreAccessible(context, containerApp, envVars);
+        await AssertLogsAppearInApplicationInsights(context.Time, containerApp);
+        await AssertLogsAppearInApplicationInsightsWithCustomKqlQuery(context.Time, containerApp);
     }
 
-    private static async Task AssertLogsAppearInApplicationInsights(AzureContainerApp containerApp)
+    private static async Task AssertLogsAppearInApplicationInsights(TimeProvider time, AzureContainerApp containerApp)
     {
         var expectedLog = "TestContainerApp request received.";
         var timeout = TimeSpan.FromMinutes(5);
 
-        var logs = await WaitForLogToAppear(containerApp, expectedLog, timeout);
+        var logs = await WaitForLogToAppear(time, containerApp, expectedLog, timeout);
 
         Assert.That(logs.FirstOrDefault(log => log.Contains(expectedLog)), Is.Not.Null,
             $"Expected log not found in Application Insights within {timeout.TotalMinutes} minutes");
     }
 
-    private static async Task AssertLogsAppearInApplicationInsightsWithCustomKqlQuery(AzureContainerApp containerApp)
+    private static async Task AssertLogsAppearInApplicationInsightsWithCustomKqlQuery(TimeProvider time, AzureContainerApp containerApp)
     {
         var expectedLog = "custom-kql:TestContainerApp request received.";
         var customKqlQuery = "AppTraces | where Message != '' | project strcat('custom-kql:', Message) | limit 100";
         var timeout = TimeSpan.FromMinutes(5);
 
-        var logs = await WaitForLogToAppear(containerApp, expectedLog, timeout, kqlQuery: customKqlQuery);
+        var logs = await WaitForLogToAppear(time, containerApp, expectedLog, timeout, kqlQuery: customKqlQuery);
 
         Assert.That(logs.FirstOrDefault(log => log.Contains(expectedLog)), Is.Not.Null,
             $"Expected log not found using custom KQL query within {timeout.TotalMinutes} minutes");
     }
 
     private static async Task<IEnumerable<string>> WaitForLogToAppear(
+        TimeProvider time,
         AzureContainerApp containerApp,
         string expectedLog,
         TimeSpan timeout,
         string? kqlQuery = null)
     {
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var startedAt = time.GetUtcNow();
         var pollingInterval = TimeSpan.FromSeconds(10);
 
         Console.WriteLine($"Waiting for Application Insights logs to appear (timeout: {timeout.TotalMinutes} min)...");
 
         IEnumerable<string> logs = [];
 
-        while (stopwatch.Elapsed < timeout)
+        while (time.GetUtcNow() - startedAt < timeout)
         {
             logs = kqlQuery is null
                 ? containerApp.GetLogsFromApplicationInsights()
@@ -158,15 +164,10 @@ public class ContainerAppTests
 
             if (logs.Any(log => log.Contains(expectedLog)))
             {
-                Console.WriteLine($"Application Insights logs found after {stopwatch.Elapsed.TotalSeconds:F1} seconds");
                 return logs;
             }
 
-            if (stopwatch.Elapsed < timeout)
-            {
-                Console.WriteLine($"Logs not ready yet. Waiting {pollingInterval.TotalSeconds} more seconds... (elapsed: {stopwatch.Elapsed.TotalSeconds:F1}s)");
-                await Task.Delay(pollingInterval);
-            }
+            await Task.Delay(pollingInterval, time);
         }
 
         return logs;
@@ -179,9 +180,26 @@ public class ContainerAppTests
             $"Resource group '{containerAppName}' should exist after successful deployment");
     }
 
-    private static async Task AssertContainerAppRespondsWithExpectedContent(AzureContainerApp containerApp)
+    [Test]
+    public async Task WhenTheFirstRegionHasNoCapacityForTheContainerAppEnvironment_TheDeploymentFailsOverToTheNextRegion()
     {
-        using var client = new HttpClient { BaseAddress = new Uri(containerApp.Url) };
+        await using var context = new FakeExecutionContext()
+            .WithRegions(AzureLocation.EastUS, AzureLocation.WestEurope)
+            .WithNoContainerAppCapacityIn(AzureLocation.EastUS);
+        var azure = context.Azure();
+        string containerAppName = GenerateContainerAppName();
+
+        await using var containerApp = await azure.DeployContainerApp(
+            projectDirectory: "TestContainerApp",
+            name: containerAppName);
+
+        var resourceGroup = (await azure.GetResourceGroups()).Single(group => group.Name == containerAppName);
+        Assert.That(resourceGroup.Location, Is.EqualTo(AzureLocation.WestEurope),
+            "When the first region has no container app capacity, the deployment should fail over to the next configured region.");
+    }
+    private static async Task AssertContainerAppRespondsWithExpectedContent(TestExecutionContext context, AzureContainerApp containerApp)
+    {
+        using var client = context.HttpClientFor(containerApp.Url);
         var response = await client.GetAsync("/");
         
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
@@ -189,10 +207,11 @@ public class ContainerAppTests
         Assert.That(content, Is.EqualTo("TestContainerApp deployment successful!"));
     }
 
-    [Test, Category("LongRunning")]
-    public async Task DeployContainerApp_WithManagedIdentity_CanReadKeyVaultSecretViaIdentity()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp_WithManagedIdentity_CanReadKeyVaultSecretViaIdentity(TestExecutionContext context)
     {
-        var azure = new AzureCloud(location: AzureLocation.EastUS);
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string containerAppName = GenerateContainerAppName();
         string secretValue = Guid.NewGuid().ToString();
 
@@ -213,20 +232,68 @@ public class ContainerAppTests
             environmentVariables: new Dictionary<string, string>
             {
                 { "KEY_VAULT_URI", keyVault.Uri },
-                { "KEY_VAULT_SECRET_NAME", "test-secret" }
+                { "KEY_VAULT_SECRET_NAME", "test-secret" },
+                { "AZURE_CLIENT_ID", identity.ClientId.ToString() }
             });
 
-        using var client = new HttpClient { BaseAddress = new Uri(containerApp.Url) };
+        using var client = context.HttpClientFor(containerApp.Url);
         var response = await client.GetAsync("/keyvault-secret");
         string retrievedSecret = await response.Content.ReadAsStringAsync();
-        Assert.That(retrievedSecret.Trim('"'), Is.EqualTo(secretValue));
+        TestContext.Out.WriteLine($"/keyvault-secret response ({(int)response.StatusCode}): {retrievedSecret}");
+        Assert.That(retrievedSecret.Trim('"'), Is.EqualTo(secretValue),
+            "A container app with a managed identity should read the Key Vault secret it was granted access to.");
+    }
+
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp_UsesTheProvidedContainerRegistry(TestExecutionContext context)
+    {
+        await using var _ = context.Started();
+        var azure = context.Azure();
+        string containerAppName = GenerateContainerAppName();
+
+        await using var providedRegistry = await azure.CreateContainerRegistry(
+            resourceGroupName: $"{containerAppName}-registry",
+            registryName: $"existingregistry{Guid.NewGuid().ToString("N")[..8]}");
+
+        await using var containerApp = await azure.DeployContainerApp(
+            projectDirectory: "TestContainerApp",
+            name: containerAppName,
+            containerRegistryResourceId: providedRegistry.ResourceId);
+
+        bool imageIsHostedInProvidedRegistry = await providedRegistry.ContainsImage(containerAppName.ToLower());
+        Assert.That(imageIsHostedInProvidedRegistry, Is.True,
+            "Expected the provided container registry to host the deployed image, but the deployment used a different registry.");
+    }
+
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DisposingContainerApp_DoesNotRemoveTheProvidedContainerRegistry(TestExecutionContext context)
+    {
+        await using var _ = context.Started();
+        var azure = context.Azure();
+        string containerAppName = GenerateContainerAppName();
+        string registryResourceGroupName = $"{containerAppName}-registry";
+
+        await using var providedRegistry = await azure.CreateContainerRegistry(
+            resourceGroupName: registryResourceGroupName,
+            registryName: $"existingregistry{Guid.NewGuid().ToString("N")[..8]}");
+
+        var containerApp = await azure.DeployContainerApp(
+            projectDirectory: "TestContainerApp",
+            name: containerAppName,
+            containerRegistryResourceId: providedRegistry.ResourceId);
+        await containerApp.DisposeAsync();
+
+        bool providedRegistryStillExists = await providedRegistry.Exists();
+        Assert.That(providedRegistryStillExists, Is.True,
+            "Disposing the container app should not remove the container registry that was provided by the caller.");
     }
 
     private static async Task AssertEnvironmentVariablesAreAccessible(
+        TestExecutionContext context,
         AzureContainerApp containerApp, 
         Dictionary<string, string> envVars)
     {
-        using var client = new HttpClient { BaseAddress = new Uri(containerApp.Url) };
+        using var client = context.HttpClientFor(containerApp.Url);
         
         foreach (var (key, expectedValue) in envVars)
         {

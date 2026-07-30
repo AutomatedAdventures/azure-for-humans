@@ -8,10 +8,11 @@ public class AzureFunctionTests
     private static string GenerateFunctionName() =>
         $"testfunction-{Guid.NewGuid().ToString("N")[..8]}";
 
-    [Test]
-    public async Task DeployAzureFunction_WhenDeploymentFails_CleansUpResources()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployAzureFunction_WhenDeploymentFails_CleansUpResources(TestExecutionContext context)
     {
-        var azure = new AzureCloud();
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string functionName = GenerateFunctionName();
 
         var exception = Assert.ThrowsAsync<InvalidOperationException>(async () =>
@@ -27,24 +28,26 @@ public class AzureFunctionTests
             $"Resource group '{functionName}' should have been cleaned up after deployment failure");
     }
 
-    [Test]
-    public async Task DeployAzureFunction()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployAzureFunction(TestExecutionContext context)
     {
-        var azure = new AzureCloud();
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string functionName = GenerateFunctionName();
 
         await using var function = await azure.DeployAzureFunction(
             projectDirectory: "AzureFunctionSample", 
             name: functionName);
 
-        await AssertFunctionIsRunning(functionName);
+        await AssertFunctionIsRunning(context, function);
         await AssertLogsAppearInApplicationInsights(function);
     }
 
-    [Test]
-    public async Task DeployAzureFunction_WithEnvironmentVariables()
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployAzureFunction_WithEnvironmentVariables(TestExecutionContext context)
     {
-        var azure = new AzureCloud();
+        await using var _ = context.Started();
+        var azure = context.Azure();
         string functionName = GenerateFunctionName();
         var envVars = new Dictionary<string, string>
         {
@@ -57,13 +60,12 @@ public class AzureFunctionTests
             name: functionName,
             environmentVariables: envVars);
         
-        await AssertEnvironmentVariablesAreSet(functionName, envVars);
+        await AssertEnvironmentVariablesAreSet(context, function, envVars);
     }
 
-    private static async Task AssertFunctionIsRunning(string functionName)
+    private static async Task AssertFunctionIsRunning(TestExecutionContext context, AzureFunction function)
     {
-        using var client = new HttpClient();
-        client.BaseAddress = new Uri($"https://{functionName.ToLower()}.azurewebsites.net");
+        using var client = context.HttpClientFor(function.Url);
         
         var response = await client.GetAsync("api/HttpTrigger");
 
@@ -117,11 +119,11 @@ public class AzureFunctionTests
     }
 
     private static async Task AssertEnvironmentVariablesAreSet(
-        string functionName, 
+        TestExecutionContext context,
+        AzureFunction function, 
         Dictionary<string, string> expectedVariables)
     {
-        using var client = new HttpClient();
-        client.BaseAddress = new Uri($"https://{functionName.ToLower()}.azurewebsites.net");
+        using var client = context.HttpClientFor(function.Url);
         
         foreach (var (name, expectedValue) in expectedVariables)
         {
