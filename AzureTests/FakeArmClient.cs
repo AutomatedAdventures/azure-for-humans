@@ -33,6 +33,14 @@ public class FakeArmClient : IArmClient
 
     internal FakeWebApp? WebAppAt(string host) => _webApps.GetValueOrDefault(host);
 
+    // What each container app was last told to run. Azure only replaces a running container app when
+    // this changes; pushing new code under an image reference it already has changes nothing here.
+    private readonly Dictionary<string, string> _containerAppTemplates = new();
+
+    internal string? ContainerAppTemplateAt(string host) => _containerAppTemplates.GetValueOrDefault(host);
+
+    internal void RecordContainerAppTemplate(string host, string template) => _containerAppTemplates[host] = template;
+
     public FakeArmClient ThatHasNoContainerAppCapacityIn(AzureLocation location)
     {
         _regionsWithoutContainerAppCapacity.Add(location);
