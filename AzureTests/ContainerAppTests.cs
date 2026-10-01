@@ -72,6 +72,53 @@ public class ContainerAppTests
     }
 
     [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp_WhenRedeployedWithANewBuild_ServesTheNewBuild(TestExecutionContext context)
+    {
+        await using var _ = context.Started();
+        var azure = context.Azure();
+        string containerAppName = GenerateContainerAppName();
+
+        // Not disposed: disposing a deployment deletes its resource group, which the redeploy reuses.
+        await azure.DeployContainerApp(
+            projectDirectory: "TestContainerAppWithDockerBuildArgs",
+            name: containerAppName,
+            dockerBuildArguments: new Dictionary<string, string> { { "APP_GREETING", "first-build" } });
+
+        // The build argument ends up inside the image and nowhere in the app's configuration, so this
+        // is a redeploy whose new code is the only thing that changed. That is the redeploy Azure does
+        // not pick up on its own when every build is pushed under the same tag.
+        await using var redeployed = await azure.DeployContainerApp(
+            projectDirectory: "TestContainerAppWithDockerBuildArgs",
+            name: containerAppName,
+            dockerBuildArguments: new Dictionary<string, string> { { "APP_GREETING", "second-build" } });
+
+        using var client = context.HttpClientFor(redeployed.Url);
+        var response = await client.GetAsync("/variable/APP_GREETING");
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        string value = await response.Content.ReadAsStringAsync();
+        Assert.That(value.Trim('"'), Is.EqualTo("second-build"),
+            "a redeploy should serve the build it just pushed, not keep running the previous one");
+    }
+
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp_WithAnInvalidImageTag_IsRefusedBeforeAnythingIsCreated(TestExecutionContext context)
+    {
+        await using var _ = context.Started();
+        var azure = context.Azure();
+        string containerAppName = GenerateContainerAppName();
+
+        var refusal = Assert.ThrowsAsync<ArgumentException>(async () =>
+            await azure.DeployContainerApp(
+                projectDirectory: "TestContainerApp",
+                name: containerAppName,
+                imageTag: "not a tag"));
+
+        Assert.That(refusal!.Message, Does.Contain("not a tag"));
+        Assert.That(await azure.ResourceGroupExists(containerAppName), Is.False,
+            "an image tag Docker would refuse should stop the deployment before it creates anything");
+    }
+
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
     public async Task DeployContainerApp_WithDockerBuildArguments(TestExecutionContext context)
     {
         await using var _ = context.Started();

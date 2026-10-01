@@ -214,10 +214,12 @@ public class AzureCloud
         string? workspaceRoot = null,
         Dictionary<string, string>? dockerBuildArguments = null,
         string? managedIdentityResourceId = null,
-        string? containerRegistryResourceId = null)
+        string? containerRegistryResourceId = null,
+        string? imageTag = null)
     {
         DeploymentLogger.Start($"Starting Container App deployment: {name}");
 
+        string tag = ImageTagFor(imageTag);
         (var buildContext, var projectDir) = ProjectPathResolver.GetBuildContextPaths(projectDirectory, workspaceRoot);
 
         RequestFailedException? lastCapacityError = null;
@@ -229,7 +231,7 @@ public class AzureCloud
             {
                 var acr = await ResolveContainerRegistry(resourceGroup, name, containerRegistryResourceId);
 
-                string imageName = await BuildAndPushImage(projectDir, buildContext, acr, name, dockerBuildArguments);
+                string imageName = await BuildAndPushImage(projectDir, buildContext, acr, name, tag, dockerBuildArguments);
 
                 var deployment = await _containerAppService.Deploy(resourceGroup, name, imageName, acr, environmentVariables, managedIdentityResourceId);
 
@@ -295,13 +297,39 @@ public class AzureCloud
         return acrName.Length > 50 ? acrName[..50] : acrName;
     }
 
-    private async Task<string> BuildAndPushImage(DirectoryInfo projectDir, DirectoryInfo buildContext, IContainerRegistryResource acr, string name, Dictionary<string, string>? dockerBuildArguments)
+    /// <summary>
+    /// A container app only starts new replicas when what it is told to run changes, so every
+    /// deployment needs an image reference of its own. Pushed under the same tag each time, a new
+    /// build reaches the registry and never the app: it goes on running whatever it pulled first.
+    /// A caller that can name the build (a commit, a build number) should pass that, so the running
+    /// app says which build it is; otherwise each deployment gets a tag nothing else will reuse.
+    /// </summary>
+    private static string ImageTagFor(string? requested)
+    {
+        if (requested is null)
+            return $"{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..8]}";
+
+        if (!ValidImageTag.IsMatch(requested))
+            throw new ArgumentException(
+                $"'{requested}' is not a valid image tag: letters, digits, '_', '.' and '-' only, not starting with '.' or '-', at most 128 characters.",
+                nameof(requested));
+
+        return requested;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex ValidImageTag =
+        new(@"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private async Task<string> BuildAndPushImage(DirectoryInfo projectDir, DirectoryInfo buildContext, IContainerRegistryResource acr, string name, string tag, Dictionary<string, string>? dockerBuildArguments)
     {
         var credentials = await acr.GetCredentialsAsync();
         string loginServer = acr.LoginServer;
 
-        await BuildAndPushDockerImage(projectDir, buildContext, loginServer, credentials.Username, credentials.Password, name.ToLower(), dockerBuildArguments);
-        return $"{loginServer}/{name.ToLower()}:latest";
+        await BuildAndPushDockerImage(projectDir, buildContext, loginServer, credentials.Username, credentials.Password, name.ToLower(), tag, dockerBuildArguments);
+
+        // The app runs the build by its own tag. :latest is still pushed alongside, for anything
+        // that looks an image up by it, but nothing is deployed from it.
+        return $"{loginServer}/{name.ToLower()}:{tag}";
     }
 
     private async Task BuildAndPushDockerImage(
@@ -311,16 +339,20 @@ public class AzureCloud
         string acrUsername,
         string acrPassword,
         string imageName,
+        string tag,
         Dictionary<string, string>? dockerBuildArguments)
     {
         await _docker.Verify();
         await _docker.Login(acrLoginServer, acrUsername, acrPassword);
 
-        string imageTag = $"{acrLoginServer}/{imageName}:latest";
+        string taggedImage = $"{acrLoginServer}/{imageName}:{tag}";
+        string latestImage = $"{acrLoginServer}/{imageName}:latest";
         string dockerfilePath = Path.GetRelativePath(buildContext.FullName, Path.Combine(projectDir.FullName, "Dockerfile"))
             .Replace('\\', '/');
-        await _docker.Build(buildContext, imageTag, dockerfilePath, dockerBuildArguments);
-        await _docker.Push(imageTag);
+        await _docker.Build(buildContext, taggedImage, dockerfilePath, dockerBuildArguments);
+        await _docker.Tag(taggedImage, latestImage);
+        await _docker.Push(taggedImage);
+        await _docker.Push(latestImage);
     }
 
     internal static List<AppServiceNameValuePair> AddEnvironmentVariablesToAppSettings(

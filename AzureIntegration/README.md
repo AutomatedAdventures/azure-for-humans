@@ -11,6 +11,7 @@ dotnet add package AzureForHumans
 ## Features
 
 - **Simple Azure Function Deployment**: Deploy Azure Functions with minimal configuration
+- **Container App Deployment**: Build a project's Dockerfile and run it as an Azure Container App
 - **Resource Group Management**: Create and manage Azure resource groups easily
 - **Storage Account Integration**: Simplified storage account creation and management
 - **App Service Plan Management**: Easy creation of app service plans for your functions
@@ -68,6 +69,26 @@ var storageAccount = await resourceGroup.CreateStorageAccount("myapp");
 Console.WriteLine($"Storage Account: {storageAccount.Name}");
 Console.WriteLine($"Connection String: {storageAccount.ConnectionString}");
 ```
+
+### Deploying a Container App
+
+```csharp
+var azureCloud = new AzureCloud();
+
+// Builds the Dockerfile in "MyApp", pushes the image and runs it as a container app
+await using var containerApp = await azureCloud.DeployContainerApp(
+    projectDirectory: "MyApp",
+    name: "my-container-app",
+    imageTag: commitSha); // optional
+
+Console.WriteLine($"Container App deployed at: {containerApp.Url}");
+```
+
+Each deployment is pushed under a tag of its own and the app is pointed at that tag, so redeploying under the same name always replaces what is running. Pass `imageTag` (a commit, a build number) to be able to tell which build an app is running; without it each deployment gets a timestamped tag. `:latest` is pushed alongside, but nothing is deployed from it.
+
+The call returns once the new revision is running, not merely once the app's URL answers, which the previous revision keeps doing while the new one starts.
+
+Disposing the returned `AzureContainerApp` deletes its resource group.
 
 ## Prerequisites
 

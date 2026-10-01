@@ -65,6 +65,17 @@ public class FakeContainerAppService(FakeArmClient arm) : IContainerAppService
         await resourceGroup.CreateApplicationInsights(name);
 
         string fqdn = $"{name.ToLower()}.fake.azurecontainerapps.io";
+
+        // Azure starts new replicas only when the app's template changes. The template holds the image
+        // reference and the app's own variables; what went into building the image is not part of it,
+        // so a new build pushed under the same reference leaves the running replica as it was.
+        string template = TemplateOf(imageName, environmentVariables);
+        if (arm.ContainerAppTemplateAt(fqdn) == template && arm.WebAppAt(fqdn) is { } running)
+        {
+            return new ContainerAppDeployment(fqdn, new FakeApplicationLogs(running));
+        }
+        arm.RecordContainerAppTemplate(fqdn, template);
+
         var combinedEnvironment = new Dictionary<string, string>(arm.BuildArgumentsForImage(imageName));
         if (environmentVariables is not null)
         {
@@ -76,6 +87,10 @@ public class FakeContainerAppService(FakeArmClient arm) : IContainerAppService
         var app = arm.RecordWebApp(fqdn, arm.ProjectForImage(imageName) ?? name, combinedEnvironment);
         return new ContainerAppDeployment(fqdn, new FakeApplicationLogs(app));
     }
+
+    private static string TemplateOf(string imageName, Dictionary<string, string>? environmentVariables) =>
+        string.Join("\n", new[] { imageName }.Concat(
+            (environmentVariables ?? new()).OrderBy(variable => variable.Key).Select(variable => $"{variable.Key}={variable.Value}")));
 }
 
 internal class FakeApplicationLogs(FakeWebApp app) : IApplicationLogs
