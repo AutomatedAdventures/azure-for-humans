@@ -93,6 +93,10 @@ public class RealContainerAppService : IContainerAppService
         string fqdn = containerApp.Value.Data.Configuration.Ingress.Fqdn;
         DeploymentLogger.Log("Container App created, waiting for readiness...");
 
+        // The URL alone cannot say the new build is live: while the revision just created is still
+        // starting, the previous one keeps answering it. So the revision itself has to be running
+        // before the URL is worth asking.
+        await WaitForRevisionToRun(containerApp.Value, containerApp.Value.Data.LatestRevisionName);
         await WaitForContainerAppToBeReady(fqdn);
 
         return new ContainerAppDeployment(fqdn, applicationInsights.Logs);
@@ -143,6 +147,52 @@ public class RealContainerAppService : IContainerAppService
         }
 
         return container;
+    }
+
+    // Compared as text: the SDK only knows some of the states Azure reports (it has no RunningAtMaxScale
+    // or Activating), and keeps the ones it does not know as their name.
+    private static readonly string[] RunningStates = ["Running", "RunningAtMaxScale"];
+    private static readonly string[] FailedStates = ["Failed"];
+
+    private static async Task WaitForRevisionToRun(
+        ContainerAppResource containerApp, string? revisionName, int timeoutMinutes = 10, int intervalSeconds = 10)
+    {
+        if (string.IsNullOrEmpty(revisionName))
+        {
+            DeploymentLogger.Log("Azure did not name the revision it created, so only the URL can be waited on");
+            return;
+        }
+
+        DeploymentLogger.Log($"Waiting for revision '{revisionName}' to be running...");
+        var timeout = TimeSpan.FromMinutes(timeoutMinutes);
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        string lastSeen = "not read yet";
+
+        while (stopwatch.Elapsed < timeout)
+        {
+            var revision = (await containerApp.GetContainerAppRevisionAsync(revisionName)).Value.Data;
+            string running = revision.RunningState?.ToString() ?? "unknown";
+            string provisioning = revision.ProvisioningState?.ToString() ?? "unknown";
+            lastSeen = $"running state {running}, provisioning {provisioning}, health {revision.HealthState?.ToString() ?? "unknown"}";
+
+            if (RunningStates.Contains(running))
+            {
+                DeploymentLogger.Log($"Revision '{revisionName}' is running ({lastSeen})");
+                return;
+            }
+
+            if (FailedStates.Contains(running) || FailedStates.Contains(provisioning))
+            {
+                throw new InvalidOperationException(
+                    $"Revision '{revisionName}' failed to start ({lastSeen}): {revision.ProvisioningError}");
+            }
+
+            DeploymentLogger.Log($"Revision '{revisionName}' not running yet ({lastSeen})");
+            await Task.Delay(TimeSpan.FromSeconds(intervalSeconds));
+        }
+
+        throw new TimeoutException(
+            $"Revision '{revisionName}' was not running after {timeoutMinutes} minutes; last seen: {lastSeen}");
     }
 
     private static async Task WaitForContainerAppToBeReady(string fqdn, int timeoutMinutes = 10, int intervalSeconds = 30)
