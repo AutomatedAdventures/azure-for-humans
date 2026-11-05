@@ -22,7 +22,7 @@ public class FakeAppService(FakeArmClient arm) : IAppService
         await resourceGroup.CreateAppServicePlanForWebApp(name);
 
         string host = $"{name.ToLower()}.azurewebsites.net";
-        arm.RecordWebApp(host, projectDirectory, environmentVariables);
+        arm.RecordWebApp(resourceGroup.Name, host, projectDirectory, environmentVariables);
         return host;
     }
 }
@@ -41,7 +41,7 @@ public class FakeFunctionService(FakeArmClient arm) : IFunctionService
         await resourceGroup.CreateApplicationInsights(name);
 
         string host = $"{name.ToLower()}.azurewebsites.net";
-        var app = arm.RecordWebApp(host, projectDirectory, environmentVariables);
+        var app = arm.RecordWebApp(resourceGroup.Name, host, projectDirectory, environmentVariables);
         return new FunctionDeployment(host, new FakeApplicationLogs(app));
     }
 }
@@ -84,7 +84,7 @@ public class FakeContainerAppService(FakeArmClient arm) : IContainerAppService
                 combinedEnvironment[variable.Key] = variable.Value;
             }
         }
-        var app = arm.RecordWebApp(fqdn, arm.ProjectForImage(imageName) ?? name, combinedEnvironment);
+        var app = arm.RecordWebApp(resourceGroup.Name, fqdn, arm.ProjectForImage(imageName) ?? name, combinedEnvironment);
         return new ContainerAppDeployment(fqdn, new FakeApplicationLogs(app));
     }
 

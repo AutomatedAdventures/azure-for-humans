@@ -222,6 +222,7 @@ public class AzureCloud
         string tag = ImageTagFor(imageTag);
         (var buildContext, var projectDir) = ProjectPathResolver.GetBuildContextPaths(projectDirectory, workspaceRoot);
 
+        bool isFirstDeployment = !await ResourceGroupExists(name);
         RequestFailedException? lastCapacityError = null;
         foreach (var location in _locations)
         {
@@ -238,16 +239,21 @@ public class AzureCloud
                 DeploymentLogger.Log($"Deployment complete: https://{deployment.Fqdn}");
                 return new AzureContainerApp(name, deployment.Fqdn, resourceGroup.Name, this, deployment.Logs);
             }
-            catch (RequestFailedException ex) when (ex.ErrorCode == "AKSCapacityHeavyUsage")
+            catch (RequestFailedException ex) when (isFirstDeployment && ex.ErrorCode == "AKSCapacityHeavyUsage")
             {
                 lastCapacityError = ex;
                 DeploymentLogger.Log($"Region '{location}' has no capacity, trying the next configured region...");
                 await DeleteResourceGroup(name);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (isFirstDeployment)
             {
                 DeploymentLogger.LogError($"Deployment failed: {ex.Message}. Cleaning up resources...");
                 await DeleteResourceGroup(name);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                DeploymentLogger.LogError($"Redeployment failed: {ex.Message}. Keeping what was already deployed.");
                 throw;
             }
         }

@@ -11,6 +11,7 @@ public class FakeArmClient : IArmClient
     private readonly Dictionary<string, FakeRegistry> _registries = new();
     private readonly Dictionary<string, AzureLocation> _resourceGroups = new();
     private readonly Dictionary<string, FakeWebApp> _webApps = new();
+    private readonly Dictionary<string, string> _webAppResourceGroups = new();
     private readonly Dictionary<string, string> _imageProjects = new();
     private readonly Dictionary<string, Dictionary<string, string>> _imageBuildArguments = new();
 
@@ -24,10 +25,11 @@ public class FakeArmClient : IArmClient
     internal Dictionary<string, string> BuildArgumentsForImage(string imageTag) =>
         _imageBuildArguments.GetValueOrDefault(imageTag) ?? new();
 
-    internal FakeWebApp RecordWebApp(string host, string projectDirectory, Dictionary<string, string>? environmentVariables)
+    internal FakeWebApp RecordWebApp(string resourceGroupName, string host, string projectDirectory, Dictionary<string, string>? environmentVariables)
     {
         var app = new FakeWebApp(projectDirectory, environmentVariables ?? new());
         _webApps[host] = app;
+        _webAppResourceGroups[host] = resourceGroupName;
         return app;
     }
 
@@ -74,7 +76,16 @@ public class FakeArmClient : IArmClient
 
     internal void RecordResourceGroup(string name, AzureLocation location) => _resourceGroups[name] = location;
 
-    internal void RemoveResourceGroup(string name) => _resourceGroups.Remove(name);
+    internal void RemoveResourceGroup(string name)
+    {
+        _resourceGroups.Remove(name);
+        foreach (var host in _webAppResourceGroups.Where(entry => entry.Value == name).Select(entry => entry.Key).ToList())
+        {
+            _webApps.Remove(host);
+            _webAppResourceGroups.Remove(host);
+            _containerAppTemplates.Remove(host);
+        }
+    }
 
     internal bool HasResourceGroup(string name) => _resourceGroups.ContainsKey(name);
 
