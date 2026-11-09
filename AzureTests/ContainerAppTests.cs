@@ -27,6 +27,24 @@ public class ContainerAppTests
     }
 
     [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
+    public async Task DeployContainerApp_WhenARedeployFails_TheRunningAppKeepsServing(TestExecutionContext context)
+    {
+        await using var _ = context.Started();
+        var azure = context.Azure();
+        string containerAppName = GenerateContainerAppName();
+        await using var runningApp = await azure.DeployContainerApp(
+            projectDirectory: "TestContainerApp",
+            name: containerAppName);
+
+        Assert.ThrowsAsync<Exception>(async () =>
+            await azure.DeployContainerApp(
+                projectDirectory: "TestContainerAppWithBrokenDockerfile",
+                name: containerAppName));
+
+        await AssertContainerAppRespondsWithExpectedContent(context, runningApp);
+    }
+
+    [TestCaseSource(typeof(TestExecutionContext), nameof(TestExecutionContext.All))]
     public async Task DeployContainerApp_WhenCallerProjectIsAtSolutionRoot_DeploysSuccessfully(TestExecutionContext context)
     {
         await using var _ = context.Started();
